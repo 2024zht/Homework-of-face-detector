@@ -4,7 +4,7 @@ import os, sys
 # Load .env file before anything else
 _env_path = os.path.join(os.path.dirname(__file__), ".env")
 if os.path.exists(_env_path):
-    with open(_env_path) as f:
+    with open(_env_path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
