@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+
+# Secrets — NEVER commit
+.env
+*.token
+secrets.*
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated at runtime
+static/qrcodes/*.png
+static/photos/*.jpg
+!static/qrcodes/.gitkeep
+!static/photos/.gitkeep

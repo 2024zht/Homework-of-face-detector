@@ -1,0 +1,347 @@
+"""Check-in / Check-out routes"""
+import uuid, os, tempfile
+from datetime import datetime, timedelta
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_
+
+from database import get_db
+from models import User, CheckIn, QRSession, Location
+from schemas import CheckInRequest, CheckOutRequest, CheckInResponse, CheckStatusResponse
+from services.face_service import extract_embedding_from_base64, match_face, save_checkin_photo, embedding_to_bytes
+from services.location_service import is_within_range, reverse_geocode
+from services.qr_service import validate_qr_token, mark_qr_used
+from config import AUTO_CHECKOUT_HOURS
+
+router = APIRouter(prefix="/api/check", tags=["check"])
+
+
+async def _verify_location(lat: float, lng: float, location_id: int, db: AsyncSession):
+    """Check if coordinates are within location's allowed range."""
+    stmt = select(Location).where(Location.id == location_id, Location.is_active == True)
+    result = await db.execute(stmt)
+    location = result.scalar_one_or_none()
+    if location is None:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    within, distance = is_within_range(lat, lng, location.latitude, location.longitude, location.radius_meters)
+    if not within:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Out of range: {distance:.0f}m from {location.name} (max: {location.radius_meters}m)"
+        )
+    return location, distance
+
+
+@router.post("/in", response_model=CheckInResponse)
+async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
+    # 1. Validate QR token
+    qr = await validate_qr_token(db, req.token)
+    if qr is None:
+        raise HTTPException(status_code=400, detail="QR code expired or invalid")
+    if qr.type != "checkin":
+        raise HTTPException(status_code=400, detail="This QR code is for check-out, not check-in")
+
+    # 2. Verify location
+    location, distance = await _verify_location(req.latitude, req.longitude, qr.location_id, db)
+    location_name = await reverse_geocode(req.latitude, req.longitude)
+
+    # 3. Face recognition — find matching user
+    embedding = extract_embedding_from_base64(req.face_image_base64)
+    if embedding is None:
+        raise HTTPException(status_code=400, detail="No face detected in image")
+
+    # Get all users with registered faces
+    user_stmt = select(User.id, User.face_embedding).where(
+        User.face_embedding.isnot(None),
+        User.is_active == True,
+    )
+    user_result = await db.execute(user_stmt)
+    candidates = [(row[0], row[1]) for row in user_result.fetchall()]
+
+    user_id = match_face(embedding, candidates)
+    if user_id is None:
+        raise HTTPException(status_code=400, detail="Face not recognized")
+
+    # 4. Check if user already has an active check-in
+    active_stmt = select(CheckIn).where(
+        CheckIn.user_id == user_id,
+        CheckIn.status == "active",
+    )
+    active_result = await db.execute(active_stmt)
+    active_checkin = active_result.scalar_one_or_none()
+    if active_checkin is not None:
+        raise HTTPException(status_code=400, detail="Already checked in. Please check out first.")
+
+    # 5. Save check-in photo
+    photo_filename = f"checkin_{user_id}_{uuid.uuid4().hex[:8]}.jpg"
+    photo_path = save_checkin_photo(req.face_image_base64, photo_filename)
+
+    # 6. Record check-in
+    checkin = CheckIn(
+        user_id=user_id,
+        location_id=qr.location_id,
+        lat=req.latitude,
+        lng=req.longitude,
+        location_name=location_name,
+        check_in_photo=photo_path,
+        status="active",
+    )
+    db.add(checkin)
+
+    # 7. Mark QR as used
+    await mark_qr_used(db, req.token)
+
+    # 8. Get user info for response
+    user_stmt = select(User).where(User.id == user_id)
+    user_result = await db.execute(user_stmt)
+    user = user_result.scalar_one()
+
+    await db.commit()
+    await db.refresh(checkin)
+
+    return CheckInResponse(
+        id=checkin.id,
+        user_name=user.name,
+        check_in_time=checkin.check_in_time,
+        check_out_time=None,
+        status="active",
+        location_name=location.name,
+    )
+
+
+@router.post("/out", response_model=CheckInResponse)
+async def check_out(req: CheckOutRequest, db: AsyncSession = Depends(get_db)):
+    # Determine user: by face OR by finding active check-in
+    user_id = None
+
+    if req.face_image_base64:
+        embedding = extract_embedding_from_base64(req.face_image_base64)
+        if embedding is not None:
+            user_stmt = select(User.id, User.face_embedding).where(
+                User.face_embedding.isnot(None),
+                User.is_active == True,
+            )
+            user_result = await db.execute(user_stmt)
+            candidates = [(row[0], row[1]) for row in user_result.fetchall()]
+            user_id = match_face(embedding, candidates)
+
+    if user_id is None:
+        # Try to find active check-in for manual sign-out
+        if req.token:
+            qr = await validate_qr_token(db, req.token)
+            if qr and qr.type == "checkout":
+                # With a valid checkout QR, we need face or we find any active check-in
+                # For now: require face or find all active
+                pass
+        raise HTTPException(status_code=400, detail="Face not recognized for check-out")
+
+    # Find active check-in
+    active_stmt = select(CheckIn).where(
+        CheckIn.user_id == user_id,
+        CheckIn.status == "active",
+    )
+    active_result = await db.execute(active_stmt)
+    checkin = active_result.scalar_one_or_none()
+
+    if checkin is None:
+        raise HTTPException(status_code=400, detail="No active check-in found")
+
+    # Verify location if provided
+    if req.latitude and req.longitude:
+        location, _ = await _verify_location(req.latitude, req.longitude, checkin.location_id, db)
+
+    # Save check-out photo if provided
+    if req.face_image_base64:
+        photo_filename = f"checkout_{user_id}_{uuid.uuid4().hex[:8]}.jpg"
+        checkin.check_out_photo = save_checkin_photo(req.face_image_base64, photo_filename)
+
+    checkin.check_out_time = datetime.utcnow()
+    checkin.status = "completed"
+    checkin.is_auto_checkout = False
+
+    if req.token:
+        await mark_qr_used(db, req.token)
+
+    await db.commit()
+    await db.refresh(checkin)
+
+    user_stmt = select(User).where(User.id == user_id)
+    user_result = await db.execute(user_stmt)
+    user = user_result.scalar_one()
+
+    return CheckInResponse(
+        id=checkin.id,
+        user_name=user.name,
+        check_in_time=checkin.check_in_time,
+        check_out_time=checkin.check_out_time,
+        status="completed",
+        location_name=checkin.location_name,
+    )
+
+
+@router.get("/status", response_model=CheckStatusResponse)
+async def check_status(user_id: int, db: AsyncSession = Depends(get_db)):
+    active_stmt = select(CheckIn).where(
+        CheckIn.user_id == user_id,
+        CheckIn.status == "active",
+    )
+    active_result = await db.execute(active_stmt)
+    checkin = active_result.scalar_one_or_none()
+
+    if checkin is None:
+        return CheckStatusResponse(is_checked_in=False)
+
+    auto_checkout_at = checkin.check_in_time + timedelta(hours=AUTO_CHECKOUT_HOURS)
+
+    return CheckStatusResponse(
+        is_checked_in=True,
+        check_in_time=checkin.check_in_time,
+        location_name=checkin.location_name,
+        auto_checkout_at=auto_checkout_at,
+    )
+
+
+@router.post("/batch-video")
+async def batch_checkin_video(
+    file: UploadFile = File(...),
+    token: str = Form(...),
+    latitude: Optional[float] = Form(None),
+    longitude: Optional[float] = Form(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Upload a video, detect all faces, match against registered users,
+    and batch check-in everyone found.
+    """
+    # 1. Validate QR token
+    qr = await validate_qr_token(db, token)
+    if qr is None:
+        raise HTTPException(status_code=400, detail="QR code expired or invalid")
+    if qr.type != "checkin":
+        raise HTTPException(status_code=400, detail="This QR is for check-out, not check-in")
+
+    # 2. Verify location
+    if latitude and longitude:
+        location, _ = await _verify_location(latitude, longitude, qr.location_id, db)
+        location_name = await reverse_geocode(latitude, longitude)
+    else:
+        stmt = select(Location).where(Location.id == qr.location_id)
+        result = await db.execute(stmt)
+        location = result.scalar_one_or_none()
+        location_name = location.name if location else None
+
+    # 3. Save uploaded video to temp file
+    suffix = os.path.splitext(file.filename or "video.mp4")[1] or ".mp4"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        video_path = tmp.name
+
+    # 4. Get all registered users with face embeddings
+    user_stmt = select(User.id, User.name, User.face_embedding).where(
+        User.face_embedding.isnot(None), User.is_active == True
+    )
+    user_result = await db.execute(user_stmt)
+    all_users = user_result.fetchall()
+    user_map = {row[0]: row[1] for row in all_users}  # id -> name
+    candidates = [(row[0], row[1]) for row in all_users]
+
+    if not candidates:
+        os.unlink(video_path)
+        raise HTTPException(status_code=400, detail="No registered faces in database")
+
+    # 5. Process video
+    try:
+        from services.video_service import process_video
+        result = await process_video(
+            video_path=video_path,
+            user_embeddings=candidates,
+            location_id=qr.location_id,
+            lat=latitude,
+            lng=longitude,
+            location_name=location_name,
+        )
+    finally:
+        os.unlink(video_path)  # clean up temp file
+
+    # 6. Batch check-in matched users
+    checked_in = []
+    skipped = []
+    now = datetime.utcnow()
+
+    for match in result["matched_users"]:
+        uid = match["user_id"]
+        # Check if already checked in
+        active_stmt = select(CheckIn).where(
+            CheckIn.user_id == uid, CheckIn.status == "active"
+        )
+        active_r = await db.execute(active_stmt)
+        if active_r.scalar_one_or_none():
+            skipped.append({
+                "user_id": uid,
+                "user_name": user_map.get(uid, f"User#{uid}"),
+                "reason": "Already checked in",
+            })
+            continue
+
+        # Save face photo
+        from services.face_service import save_checkin_photo
+        img_data = match["face_img_b64"]
+        photo_path = save_checkin_photo(img_data, f"video_checkin_{uid}_{uuid.uuid4().hex[:8]}.jpg")
+
+        # Record check-in
+        checkin = CheckIn(
+            user_id=uid,
+            location_id=qr.location_id,
+            lat=latitude,
+            lng=longitude,
+            location_name=location_name,
+            check_in_photo=photo_path,
+            status="active",
+        )
+        db.add(checkin)
+        checked_in.append({
+            "user_id": uid,
+            "user_name": user_map.get(uid, f"User#{uid}"),
+            "confidence": match["confidence"],
+        })
+
+    if checked_in:
+        await mark_qr_used(db, token)
+        await db.commit()
+
+    return {
+        "video_info": {
+            "filename": file.filename,
+            "frames_processed": result["total_frames"],
+            "unique_faces_found": result["unique_faces"],
+        },
+        "checked_in": checked_in,
+        "skipped": skipped,
+        "unmatched_faces": result["unmatched_faces"],
+        "processing_time_seconds": result["processing_time_seconds"],
+        "total_checked_in": len(checked_in),
+    }
+
+
+async def auto_checkout_expired(db: AsyncSession):
+    """Called by background task: auto sign-out expired check-ins."""
+    cutoff = datetime.utcnow() - timedelta(hours=AUTO_CHECKOUT_HOURS)
+    stmt = select(CheckIn).where(
+        CheckIn.status == "active",
+        CheckIn.check_in_time <= cutoff,
+    )
+    result = await db.execute(stmt)
+    expired = result.scalars().all()
+
+    for c in expired:
+        c.check_out_time = c.check_in_time + timedelta(hours=AUTO_CHECKOUT_HOURS)
+        c.status = "completed"
+        c.is_auto_checkout = True
+
+    if expired:
+        await db.commit()
+
+    return len(expired)

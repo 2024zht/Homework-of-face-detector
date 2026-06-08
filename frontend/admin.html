@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lab Check-in — Admin</title>
+<link rel="stylesheet" href="/frontend/css/app.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-brand">&#x1f3e2; 实验室签到管理</div>
+  <div class="topbar-nav">
+    <a href="#" class="active" onclick="showTab('dashboard',this)">仪表盘</a>
+    <a href="#" onclick="showTab('qrcode',this)">生成二维码</a>
+    <a href="#" onclick="showTab('users',this)">人员管理</a>
+    <a href="#" onclick="showTab('locations',this)">签到点</a>
+    <a href="#" onclick="showTab('records',this)">签到记录</a>
+    <button onclick="logout()">退出</button>
+  </div>
+</div>
+
+<div class="container-wide" id="app">
+  <!-- Tab: Dashboard -->
+  <div id="tab-dashboard">
+    <h2 class="mb-2">&#x1f4ca; 今日概览</h2>
+    <div class="stats-grid" id="statsGrid"></div>
+
+    <div class="card mt-2">
+      <h3 class="mb-2">最近签到记录</h3>
+      <div class="table-wrap"><table id="recentTable"><thead><tr><th>姓名</th><th>角色</th><th>签到时间</th><th>签退时间</th><th>地点</th><th>状态</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+
+  <!-- Tab: QR Code -->
+  <div id="tab-qrcode" class="hidden">
+    <h2 class="mb-2">&#x1f4f1; 生成签到二维码</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div class="card">
+        <h3 class="mb-2">生成二维码</h3>
+        <div class="input-group">
+          <label>类型</label>
+          <select class="input" id="qrType"><option value="checkin">签到</option><option value="checkout">签退</option></select>
+        </div>
+        <div class="input-group">
+          <label>签到点</label>
+          <select class="input" id="qrLocation"></select>
+        </div>
+        <button class="btn btn-primary btn-block" onclick="generateQR()">&#x1f4f1; 生成二维码</button>
+        <div id="qrResult" class="hidden mt-3"></div>
+      </div>
+      <div class="card">
+        <h3 class="mb-2">&#x1f3a5; 视频批量签到</h3>
+        <p style="font-size:0.85rem;color:var(--ink-secondary);margin-bottom:12px">上传视频，自动识别所有人脸并批量签到</p>
+        <div class="input-group">
+          <label>签到点</label>
+          <select class="input" id="videoLocation"></select>
+        </div>
+        <div class="input-group">
+          <label>视频文件</label>
+          <input type="file" class="input" id="videoFile" accept="video/*" style="padding:8px">
+        </div>
+        <button class="btn btn-primary btn-block" onclick="uploadVideo()" id="videoBtn">&#x1f3ac; 上传并批量签到</button>
+        <div id="videoResult" class="hidden mt-3"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab: Users -->
+  <div id="tab-users" class="hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center" class="mb-2">
+      <h2>&#x1f465; 人员管理</h2>
+      <button class="btn btn-primary" onclick="showUserModal()">+ 添加用户</button>
+    </div>
+    <div class="card">
+      <div class="table-wrap"><table id="usersTable"><thead><tr><th>姓名</th><th>用户名</th><th>角色</th><th>人脸</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+
+  <!-- Tab: Locations -->
+  <div id="tab-locations" class="hidden">
+    <div style="display:flex;justify-content:space-between;align-items:center" class="mb-2">
+      <h2>&#x1f4cd; 签到点管理</h2>
+      <button class="btn btn-primary" onclick="showLocationModal()">+ 添加签到点</button>
+    </div>
+    <div class="card">
+      <div class="table-wrap"><table id="locationsTable"><thead><tr><th>名称</th><th>纬度</th><th>经度</th><th>范围(m)</th><th>操作</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+
+  <!-- Tab: Records -->
+  <div id="tab-records" class="hidden">
+    <h2 class="mb-2">&#x1f4dd; 签到记录</h2>
+    <div class="card">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+        <input type="date" class="input" id="recordDate" style="width:auto" onchange="loadRecords()">
+        <select class="input" id="recordStatus" style="width:auto" onchange="loadRecords()">
+          <option value="">全部状态</option><option value="active">进行中</option><option value="completed">已完成</option>
+        </select>
+      </div>
+      <div class="table-wrap"><table id="recordsTable"><thead><tr><th>姓名</th><th>签到</th><th>签退</th><th>地点</th><th>时长</th><th>方式</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </div>
+</div>
+
+<!-- User modal -->
+<div class="modal-overlay hidden" id="userModal">
+  <div class="modal">
+    <h3 id="userModalTitle">添加用户</h3>
+    <form id="userForm" onsubmit="createUser(event)">
+      <div class="input-group"><label>用户名</label><input class="input" id="newUsername" required></div>
+      <div class="input-group"><label>密码</label><input class="input" type="password" id="newPassword" required></div>
+      <div class="input-group"><label>姓名</label><input class="input" id="newName" required></div>
+      <div class="input-group"><label>角色</label><select class="input" id="newRole"><option value="student">学生</option><option value="instructor">教师</option><option value="admin">管理员</option></select></div>
+      <div class="input-group"><label>人脸照片 (base64)</label><input type="file" accept="image/*" id="newFace" onchange="readFaceFile(this)"><input type="hidden" id="newFaceB64"></div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button type="submit" class="btn btn-primary">保存</button>
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('userModal').classList.add('hidden')">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Location modal -->
+<div class="modal-overlay hidden" id="locationModal">
+  <div class="modal">
+    <h3>添加签到点</h3>
+    <form onsubmit="createLocation(event)">
+      <div class="input-group"><label>名称</label><input class="input" id="locName" required placeholder="如：501实验室"></div>
+      <div class="input-group"><label>纬度 (GCJ-02)</label><input class="input" id="locLat" type="number" step="any" required placeholder="39.9042"></div>
+      <div class="input-group"><label>经度 (GCJ-02)</label><input class="input" id="locLng" type="number" step="any" required placeholder="116.4074"></div>
+      <div class="input-group"><label>允许范围 (米)</label><input class="input" id="locRadius" type="number" value="100" required></div>
+      <p style="font-size:0.78rem;color:var(--ink-muted);margin-top:-8px;margin-bottom:8px">打开<a href="https://lbs.amap.com/tools/picker" target="_blank">高德坐标拾取器</a>获取坐标</p>
+      <div style="display:flex;gap:8px">
+        <button type="submit" class="btn btn-primary">保存</button>
+        <button type="button" class="btn btn-secondary" onclick="document.getElementById('locationModal').classList.add('hidden')">取消</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+let currentTab = 'dashboard';
+const TOKEN = localStorage.getItem('token');
+const USER = JSON.parse(localStorage.getItem('user') || '{}');
+
+// Auth check
+if (!TOKEN) window.location.href = '/login.html';
+if (USER.role === 'student') window.location.href = '/';
+
+async function api(url, opts = {}) {
+  opts.headers = {...opts.headers, 'Authorization': 'Bearer ' + TOKEN};
+  const r = await fetch(API + url, opts);
+  if (r.status === 401) { localStorage.clear(); window.location.href = '/login.html'; }
+  return r;
+}
+
+function showTab(name, el) {
+  document.querySelectorAll('#app > div').forEach(d => d.classList.add('hidden'));
+  document.getElementById('tab-' + name).classList.remove('hidden');
+  document.querySelectorAll('.topbar-nav a').forEach(a => a.classList.remove('active'));
+  if (el) el.classList.add('active');
+  currentTab = name;
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'qrcode') { loadLocationSelect(); loadVideoLocationSelect(); }
+  if (name === 'users') loadUsers();
+  if (name === 'locations') loadLocations();
+  if (name === 'records') loadRecords();
+}
+
+// Dashboard
+async function loadDashboard() {
+  const r = await api('/api/admin/statistics');
+  const d = await r.json();
+  document.getElementById('statsGrid').innerHTML = `
+    <div class="stat-card"><div class="stat-value">${d.total_users}</div><div class="stat-label">总人数</div></div>
+    <div class="stat-card"><div class="stat-value">${d.checked_in_today}</div><div class="stat-label">今日已签到</div></div>
+    <div class="stat-card"><div class="stat-value">${d.not_checked_in}</div><div class="stat-label">未签到</div></div>
+    <div class="stat-card"><div class="stat-value">${d.avg_duration_minutes || '—'}</div><div class="stat-label">平均时长(min)</div></div>
+  `;
+
+  const tbody = document.querySelector('#recentTable tbody');
+  tbody.innerHTML = d.records.slice(0, 20).map(r => `
+    <tr><td>${r.user_name}</td><td>${r.role}</td><td>${new Date(r.check_in_time).toLocaleTimeString()}</td>
+    <td>${r.check_out_time ? new Date(r.check_out_time).toLocaleTimeString() : '—'}</td>
+    <td>${r.location_name || '—'}</td>
+    <td><span class="badge badge-${r.status === 'active' ? 'success' : 'warning'}">${r.status === 'active' ? '进行中' : '已完成'}</span></td></tr>
+  `).join('');
+}
+
+// QR
+async function loadLocationSelect() {
+  const r = await api('/api/admin/locations');
+  const locs = await r.json();
+  const sel = document.getElementById('qrLocation');
+  sel.innerHTML = locs.map(l => `<option value="${l.id}">${l.name} (${l.latitude}, ${l.longitude})</option>`).join('');
+  if (locs.length === 0) sel.innerHTML = '<option value="">— 请先在"签到点"页添加 —</option>';
+}
+
+async function generateQR() {
+  const locId = document.getElementById('qrLocation').value;
+  if (!locId) return alert('请先添加签到点');
+  const type = document.getElementById('qrType').value;
+  const r = await api('/api/qr/generate', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({type, location_id: parseInt(locId)}),
+  });
+  const d = await r.json();
+  document.getElementById('qrResult').classList.remove('hidden');
+  document.getElementById('qrResult').innerHTML = `
+    <div class="qr-display">
+      <img src="${d.qr_url}" alt="QR Code">
+      <p class="qr-url mt-1">扫码URL: ${d.checkin_url}</p>
+      <p style="font-size:0.78rem;color:var(--ink-muted)">有效期至: ${new Date(d.expires_at).toLocaleString()} | 令牌: ${d.token.slice(0,8)}...</p>
+      <button class="btn btn-secondary mt-2" onclick="window.open('${d.checkin_url}','_blank')">在浏览器中打开测试</button>
+    </div>
+  `;
+}
+
+// Users
+async function loadUsers() {
+  const r = await api('/api/admin/users');
+  const users = await r.json();
+  document.querySelector('#usersTable tbody').innerHTML = users.map(u => `
+    <tr><td>${u.name}</td><td>${u.username}</td><td>${u.role}</td>
+    <td>${u.has_face ? '<span class="badge badge-success">已注册</span>' : '<span class="badge badge-warning">未注册</span>'}</td>
+    <td>${u.is_active ? '正常' : '禁用'}</td>
+    <td>
+      ${!u.has_face ? `<button class="btn btn-secondary" style="padding:4px 10px;font-size:0.78rem" onclick="registerFace(${u.id})">注册人脸</button>` : ''}
+      <button class="btn btn-danger" style="padding:4px 10px;font-size:0.78rem" onclick="deactivateUser(${u.id})">禁用</button>
+    </td></tr>
+  `).join('');
+}
+
+function showUserModal() { document.getElementById('userModal').classList.remove('hidden'); }
+
+function readFaceFile(input) {
+  const file = input.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => document.getElementById('newFaceB64').value = reader.result;
+  reader.readAsDataURL(file);
+}
+
+async function createUser(e) {
+  e.preventDefault();
+  const data = {
+    username: document.getElementById('newUsername').value,
+    password: document.getElementById('newPassword').value,
+    name: document.getElementById('newName').value,
+    role: document.getElementById('newRole').value,
+  };
+  await api('/api/admin/users', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+  document.getElementById('userModal').classList.add('hidden');
+  loadUsers();
+}
+
+async function registerFace(userId) {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*';
+  input.onchange = async () => {
+    const file = input.files[0];
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const b64 = reader.result;
+      await api(`/api/admin/users/${userId}/face`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({face_image_base64: b64}),
+      });
+      loadUsers();
+    };
+    reader.readAsDataURL(file);
+  };
+  input.click();
+}
+
+async function deactivateUser(id) {
+  if (confirm('确认禁用此用户？')) {
+    await api(`/api/admin/users/${id}/deactivate`, {method:'POST'});
+    loadUsers();
+  }
+}
+
+// Locations
+async function loadLocations() {
+  const r = await api('/api/admin/locations');
+  const locs = await r.json();
+  document.querySelector('#locationsTable tbody').innerHTML = locs.map(l => `
+    <tr><td>${l.name}</td><td>${l.latitude}</td><td>${l.longitude}</td><td>${l.radius_meters}m</td><td>—</td></tr>
+  `).join('');
+}
+
+function showLocationModal() { document.getElementById('locationModal').classList.remove('hidden'); }
+
+async function createLocation(e) {
+  e.preventDefault();
+  const data = {
+    name: document.getElementById('locName').value,
+    latitude: parseFloat(document.getElementById('locLat').value),
+    longitude: parseFloat(document.getElementById('locLng').value),
+    radius_meters: parseInt(document.getElementById('locRadius').value),
+  };
+  await api('/api/admin/locations', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+  document.getElementById('locationModal').classList.add('hidden');
+  loadLocations();
+}
+
+// Records
+async function loadRecords() {
+  const date = document.getElementById('recordDate').value;
+  const status = document.getElementById('recordStatus').value;
+  const params = new URLSearchParams();
+  if (date) params.set('date', date);
+  if (status) params.set('status', status);
+  const r = await api('/api/admin/checkins?' + params);
+  const records = await r.json();
+  document.querySelector('#recordsTable tbody').innerHTML = records.map(r => {
+    const dur = r.check_out_time ? Math.round((new Date(r.check_out_time) - new Date(r.check_in_time)) / 60000) + ' min' : '—';
+    return `<tr><td>${r.user_name}</td>
+    <td>${new Date(r.check_in_time).toLocaleString()}</td>
+    <td>${r.check_out_time ? new Date(r.check_out_time).toLocaleString() : '—'}</td>
+    <td>${r.location_name || '—'}</td><td>${dur}</td>
+    <td>${r.is_auto_checkout ? '<span class="badge badge-warning">自动签退</span>' : r.status === 'active' ? '<span class="badge badge-success">进行中</span>' : '<span class="badge">手动签退</span>'}</td></tr>`;
+  }).join('');
+}
+
+// Video upload
+async function loadVideoLocationSelect() {
+  const r = await api('/api/admin/locations');
+  const locs = await r.json();
+  const sel = document.getElementById('videoLocation');
+  sel.innerHTML = locs.map(l => `<option value="${l.id}">${l.name}</option>`).join('');
+}
+
+async function uploadVideo() {
+  const locId = document.getElementById('videoLocation').value;
+  const fileInput = document.getElementById('videoFile');
+  const file = fileInput.files[0];
+  if (!file) return alert('请选择视频文件');
+  if (!locId) return alert('请先选择签到点');
+
+  // First generate a QR token
+  const qrRes = await api('/api/qr/generate', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({type: 'checkin', location_id: parseInt(locId)}),
+  });
+  const qrData = await qrRes.json();
+
+  const btn = document.getElementById('videoBtn');
+  const result = document.getElementById('videoResult');
+  btn.disabled = true; btn.textContent = '处理中...';
+  result.classList.remove('hidden');
+  result.innerHTML = '<div class="spinner" style="margin:0 auto"></div><p class="mt-1">正在分析视频...</p>';
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('token', qrData.token);
+  formData.append('latitude', '36.547308');
+  formData.append('longitude', '116.83223');
+
+  try {
+    const res = await fetch(API + '/api/check/batch-video', {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + TOKEN},
+      body: formData,
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      let html = `<div class="badge badge-success" style="font-size:1.05rem">&#x2705; 批量签到完成</div>`;
+      html += `<p class="mt-1">处理了 <b>${data.video_info.frames_processed}</b> 帧，发现 <b>${data.video_info.unique_faces_found}</b> 个不同人脸</p>`;
+
+      if (data.checked_in.length > 0) {
+        html += `<p class="mt-1" style="color:var(--success)"><b>签到成功 (${data.total_checked_in}人):</b></p>`;
+        html += data.checked_in.map(c => `<div style="font-size:0.85rem;padding:2px 0">&#x2705; ${c.user_name} (置信度: ${(c.confidence*100).toFixed(0)}%)</div>`).join('');
+      }
+      if (data.skipped.length > 0) {
+        html += `<p class="mt-1" style="color:var(--warning)"><b>跳过 (已签到):</b></p>`;
+        html += data.skipped.map(s => `<div style="font-size:0.85rem;padding:2px 0">&#x26a0; ${s.user_name} — ${s.reason}</div>`).join('');
+      }
+      if (data.unmatched_faces > 0) {
+        html += `<p class="mt-1" style="color:var(--danger)">未识别: ${data.unmatched_faces} 个人脸未匹配</p>`;
+      }
+      html += `<p style="font-size:0.78rem;color:var(--ink-muted);margin-top:8px">耗时: ${data.processing_time_seconds}秒</p>`;
+      result.innerHTML = html;
+    } else {
+      result.innerHTML = `<div class="badge badge-danger">&#x274c; ${data.detail || '处理失败'}</div>`;
+    }
+  } catch (e) {
+    result.innerHTML = `<div class="badge badge-danger">网络错误: ${e.message}</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '&#x1f3ac; 上传并批量签到';
+  }
+}
+
+// Init
+function logout() { localStorage.clear(); window.location.href = '/login.html'; }
+document.getElementById('recordDate').value = new Date().toISOString().split('T')[0];
+loadDashboard();
+</script>
+</body>
+</html>

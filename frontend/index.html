@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Lab Check-in</title>
+<link rel="stylesheet" href="/frontend/css/app.css">
+</head>
+<body>
+<div class="container" id="app">
+  <!-- Header -->
+  <div style="text-align:center;padding:20px 0 12px">
+    <h1 style="color:var(--brand)">&#x1f3e2; 实验室签到</h1>
+    <p style="margin-top:4px">人脸识别 · 精准定位 · 安全快速</p>
+  </div>
+
+  <!-- Status card (shown when checked in) -->
+  <div class="card result-card result-success hidden" id="statusCard">
+    <div class="result-icon">&#x2705;</div>
+    <h2 id="statusTitle">已签到</h2>
+    <p id="statusDetail"></p>
+    <p class="mt-1" style="font-size:0.82rem;color:var(--ink-muted)" id="statusTime"></p>
+  </div>
+
+  <!-- Main check-in card -->
+  <div class="card" id="mainCard">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 id="stepTitle">第1步：验证位置</h3>
+      <span class="badge badge-warning hidden" id="locationBadge">定位中...</span>
+    </div>
+
+    <!-- Step 1: Location -->
+    <div id="stepLocation">
+      <p style="font-size:0.9rem;margin-bottom:12px">需要获取你的位置以确认在签到范围内</p>
+      <div class="flex gap-2">
+        <button class="btn btn-primary btn-block" onclick="getLocation()" id="locBtn">&#x1f4cd; 获取位置</button>
+      </div>
+      <div id="locResult" class="mt-2 hidden"></div>
+    </div>
+
+    <!-- Step 2: Camera -->
+    <div id="stepCamera" class="hidden">
+      <p style="font-size:0.9rem;margin-bottom:12px">请将面部对准框内，光线充足时效果最佳</p>
+      <div class="camera-container">
+        <video id="video" autoplay playsinline></video>
+        <div class="camera-overlay"></div>
+        <div class="camera-hint">将面部对准虚线框</div>
+        <canvas id="canvas" class="hidden"></canvas>
+      </div>
+      <button class="btn btn-primary btn-block btn-lg mt-2" onclick="takePhoto()" id="captureBtn">&#x1f4f8; 拍照签到</button>
+      <div id="captureResult" class="text-center mt-2 hidden"></div>
+    </div>
+  </div>
+
+  <!-- Result -->
+  <div class="card hidden" id="resultCard"></div>
+
+  <!-- Token info -->
+  <p class="text-center mt-2" style="font-size:0.75rem;color:var(--ink-muted)" id="tokenInfo"></p>
+</div>
+
+<script>
+const API = window.location.origin;
+let token = null, qrType = null, locationId = null;
+let userLat = null, userLng = null, locationVerified = false;
+
+// Parse URL params
+(function() {
+  const p = new URLSearchParams(window.location.search);
+  token = p.get('token');
+  qrType = p.get('type') || 'checkin';
+  locationId = p.get('location_id');
+  if (token) {
+    document.getElementById('tokenInfo').textContent = `Session: ${token.slice(0,8)}... | Type: ${qrType}`;
+    // Validate token
+    fetch(`${API}/api/qr/validate/${token}`)
+      .then(r => r.json())
+      .then(d => {
+        if (!d.valid) showToast('二维码已过期或无效', 'error');
+        else document.getElementById('stepTitle').textContent = `${d.location_name || '签到点'} — ${qrType === 'checkin' ? '签到' : '签退'}`;
+      });
+  }
+})();
+
+// Check existing status
+(async function() {
+  const u = JSON.parse(localStorage.getItem('user') || '{}');
+  if (u.id) {
+    const r = await fetch(`${API}/api/check/status?user_id=${u.id}`);
+    const d = await r.json();
+    if (d.is_checked_in) {
+      document.getElementById('statusCard').classList.remove('hidden');
+      document.getElementById('statusTitle').textContent = '当前已签到';
+      document.getElementById('statusDetail').textContent = `地点: ${d.location_name || '—'}`;
+      document.getElementById('statusTime').textContent = `签到时间: ${new Date(d.check_in_time).toLocaleString()}`;
+      if (d.auto_checkout_at) {
+        document.getElementById('statusTime').textContent += ` | 自动签退: ${new Date(d.auto_checkout_at).toLocaleString()}`;
+      }
+    }
+  }
+})();
+
+function getLocation() {
+  const btn = document.getElementById('locBtn');
+  const badge = document.getElementById('locationBadge');
+  const result = document.getElementById('locResult');
+  btn.disabled = true; btn.textContent = '定位中...'; badge.classList.remove('hidden');
+
+  if (!navigator.geolocation) {
+    // Try Gaode JS API
+    loadGaodeLocation(btn, result, badge);
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (pos) => {
+      userLat = pos.coords.latitude;
+      userLng = pos.coords.longitude;
+      badge.className = 'badge badge-success'; badge.textContent = `已定位 (${pos.coords.accuracy.toFixed(0)}m)`;
+
+      if (locationId) {
+        const r = await fetch(`${API}/api/admin/validate-location`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId)}),
+        });
+        const d = await r.json();
+        result.classList.remove('hidden');
+        if (d.within_range) {
+          result.innerHTML = `<div class="badge badge-success">&#x2705; 在范围内 (${d.distance_meters}m / 允许${d.max_meters}m)</div><p style="font-size:0.8rem;margin-top:4px;color:var(--ink-muted)">${d.address || ''}</p>`;
+          locationVerified = true;
+          showStep2();
+        } else {
+          result.innerHTML = `<div class="badge badge-danger">&#x274c; 超出范围 (${d.distance_meters}m / 允许${d.max_meters}m)</div>`;
+          locationVerified = false;
+        }
+      } else {
+        locationVerified = true;
+        result.innerHTML = `<div class="badge badge-success">&#x2705; 定位成功</div>`;
+        showStep2();
+      }
+      btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
+    },
+    (err) => {
+      loadGaodeLocation(btn, result, badge);
+    },
+    {enableHighAccuracy: true, timeout: 15000, maximumAge: 60000}
+  );
+}
+
+function loadGaodeLocation(btn, result, badge) {
+  // Fallback: try Gaode JS API
+  const script = document.createElement('script');
+  script.src = 'https://webapi.amap.com/maps?v=2.0&key=c8e18f605b4553734875dbc4d172be96&plugin=AMap.Geolocation';
+  script.onload = function() {
+    if (window.AMap) {
+      window.AMap.plugin('AMap.Geolocation', function() {
+        const geo = new window.AMap.Geolocation({enableHighAccuracy: true, timeout: 10000});
+        geo.getCurrentPosition(async (status, result) => {
+          if (status === 'complete' && result.position) {
+            userLat = result.position.lat;
+            userLng = result.position.lng;
+            badge.className = 'badge badge-success'; badge.textContent = `高德定位 (${result.accuracy?.toFixed(0) || '?'}m)`;
+
+            if (locationId) {
+              const r = await fetch(`${API}/api/admin/validate-location`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId)}),
+              });
+              const d = await r.json();
+              result.classList.remove('hidden');
+              if (d.within_range) {
+                result.innerHTML = `<div class="badge badge-success">&#x2705; 在范围内 (${d.distance_meters}m / 允许${d.max_meters}m)</div><p style="font-size:0.8rem;margin-top:4px">${d.address || ''}</p>`;
+                locationVerified = true;
+                showStep2();
+              } else {
+                result.innerHTML = `<div class="badge badge-danger">&#x274c; 超出范围 (${d.distance_meters}m / 允许${d.max_meters}m)</div>`;
+              }
+            } else {
+              locationVerified = true;
+              showStep2();
+            }
+          } else {
+            result.classList.remove('hidden');
+            result.innerHTML = `<div class="badge badge-danger">&#x274c; 定位失败: 请确保已开启GPS和WiFi</div>`;
+          }
+          btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
+        });
+      });
+    }
+  };
+  document.head.appendChild(script);
+}
+
+function showStep2() {
+  document.getElementById('stepLocation').classList.add('hidden');
+  document.getElementById('stepCamera').classList.remove('hidden');
+  document.getElementById('stepTitle').textContent = '第2步：人脸识别';
+  startCamera();
+}
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'user', width: {ideal: 640}, height: {ideal: 480}}});
+    document.getElementById('video').srcObject = stream;
+  } catch (e) {
+    document.getElementById('captureResult').classList.remove('hidden');
+    document.getElementById('captureResult').innerHTML = '<div class="badge badge-danger">无法访问摄像头: ' + e.message + '</div>';
+  }
+}
+
+function takePhoto() {
+  const btn = document.getElementById('captureBtn');
+  btn.disabled = true; btn.textContent = '处理中...';
+
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const b64 = canvas.toDataURL('image/jpeg', 0.85);
+
+  submitCheckIn(b64, btn);
+}
+
+async function submitCheckIn(b64, btn) {
+  const result = document.getElementById('captureResult');
+  result.classList.remove('hidden');
+  result.innerHTML = '<div class="spinner" style="margin:0 auto"></div><p class="mt-1">人脸识别中...</p>';
+
+  const endpoint = qrType === 'checkout' ? '/api/check/out' : '/api/check/in';
+  try {
+    const res = await fetch(API + endpoint, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        token: token,
+        face_image_base64: b64,
+        latitude: userLat,
+        longitude: userLng,
+      }),
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      result.innerHTML = `<div class="badge badge-success" style="font-size:1.1rem">&#x2705; ${qrType === 'checkout' ? '签退成功' : '签到成功'}!</div>
+        <p class="mt-1">${data.user_name}</p>
+        <p style="font-size:0.8rem;color:var(--ink-muted)">时间: ${new Date(data.check_in_time).toLocaleString()}</p>`;
+      // Update status card
+      if (qrType === 'checkin') {
+        document.getElementById('statusCard').classList.remove('hidden');
+        document.getElementById('statusTitle').textContent = '已签到';
+        document.getElementById('statusDetail').textContent = `${data.user_name} — ${data.location_name || ''}`;
+        document.getElementById('statusTime').textContent = `签到时间: ${new Date(data.check_in_time).toLocaleString()}`;
+      }
+    } else {
+      result.innerHTML = `<div class="badge badge-danger">&#x274c; ${data.detail || '操作失败'}</div>`;
+      btn.disabled = false; btn.textContent = '&#x1f4f8; 重新拍照';
+    }
+  } catch (e) {
+    result.innerHTML = `<div class="badge badge-danger">网络错误: ${e.message}</div>`;
+    btn.disabled = false; btn.textContent = '&#x1f4f8; 重新拍照';
+  }
+}
+
+function showToast(msg, type) {
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+</script>
+</body>
+</html>

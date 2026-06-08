@@ -1,0 +1,135 @@
+"""Pydantic request/response schemas"""
+from pydantic import BaseModel, Field
+from typing import Optional
+from datetime import datetime
+
+
+# ── Auth ─────────────────────────────────────────────────
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: dict
+
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    name: str
+    role: str = "student"  # admin, instructor, student
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    name: str
+    role: str
+    has_face: bool = False
+    is_active: bool
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ── Location ─────────────────────────────────────────────
+class LocationCreate(BaseModel):
+    name: str
+    latitude: float
+    longitude: float
+    radius_meters: int = 100
+
+
+class LocationResponse(BaseModel):
+    id: int
+    name: str
+    latitude: float
+    longitude: float
+    radius_meters: int
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+# ── Check-in ─────────────────────────────────────────────
+class CheckInRequest(BaseModel):
+    token: str
+    face_image_base64: str  # base64-encoded JPEG
+    latitude: Optional[float] = None  # from Gaode JS API
+    longitude: Optional[float] = None
+
+
+class CheckOutRequest(BaseModel):
+    token: Optional[str] = None
+    face_image_base64: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+
+class CheckInResponse(BaseModel):
+    id: int
+    user_name: str
+    check_in_time: datetime
+    check_out_time: Optional[datetime] = None
+    status: str
+    location_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CheckStatusResponse(BaseModel):
+    is_checked_in: bool
+    check_in_time: Optional[datetime] = None
+    location_name: Optional[str] = None
+    auto_checkout_at: Optional[datetime] = None
+
+
+# ── QR ───────────────────────────────────────────────────
+class QRGenerateRequest(BaseModel):
+    type: str = "checkin"  # checkin / checkout
+    location_id: int
+
+
+class QRValidateResponse(BaseModel):
+    valid: bool
+    type: Optional[str] = None
+    location_name: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    message: str = ""
+
+
+# ── Stats ────────────────────────────────────────────────
+class CheckInRecord(BaseModel):
+    id: int
+    user_id: int
+    user_name: str
+    role: str
+    check_in_time: datetime
+    check_out_time: Optional[datetime] = None
+    location_name: Optional[str] = None
+    status: str
+    is_auto_checkout: bool
+
+    class Config:
+        from_attributes = True
+
+
+class StatisticsResponse(BaseModel):
+    total_users: int
+    checked_in_today: int
+    not_checked_in: int
+    total_checkins_today: int
+    avg_duration_minutes: Optional[float] = None
+    records: list[CheckInRecord] = []
+
+
+class LocationValidateRequest(BaseModel):
+    lat: float
+    lng: float
+    location_id: int
