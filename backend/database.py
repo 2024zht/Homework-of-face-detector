@@ -50,4 +50,13 @@ async def init_db():
                 created_by=1,
             ))
 
+        # Test student user
+        test_result = await session.execute(select(User).where(User.username == "gxf"))
+        if test_result.scalar_one_or_none() is None:
+            session.add(User(
+                username="gxf",
+                password_hash=bcrypt.hashpw("123456".encode(), bcrypt.gensalt()).decode(),
+                name="郭晓飞", role="student", is_active=True,
+            ))
+
         await session.commit()

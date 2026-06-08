@@ -62,6 +62,7 @@ class CheckInRequest(BaseModel):
     face_image_base64: str  # base64-encoded JPEG
     latitude: Optional[float] = None  # from Gaode JS API
     longitude: Optional[float] = None
+    user_name: Optional[str] = None  # manual name input as fallback
 
 
 class CheckOutRequest(BaseModel):

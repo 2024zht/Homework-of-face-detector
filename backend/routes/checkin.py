@@ -61,6 +61,18 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
     candidates = [(row[0], row[1]) for row in user_result.fetchall()]
 
     user_id = match_face(embedding, candidates)
+
+    # Fallback: if face not recognized but user provided a name, match by name
+    if user_id is None and getattr(req, 'user_name', None):
+        name_stmt = select(User.id).where(
+            User.name == req.user_name.strip(),
+            User.is_active == True,
+        )
+        name_result = await db.execute(name_stmt)
+        user_row = name_result.fetchone()
+        if user_row:
+            user_id = user_row[0]
+
     if user_id is None:
         raise HTTPException(status_code=400, detail="Face not recognized")
 

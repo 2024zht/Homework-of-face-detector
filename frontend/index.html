@@ -38,7 +38,16 @@
       <div id="locResult" class="mt-2 hidden"></div>
     </div>
 
-    <!-- Step 2: Camera -->
+    <!-- Step 2: Name input -->
+    <div id="stepName" class="hidden">
+      <p style="font-size:0.9rem;margin-bottom:12px">请输入你的姓名进行签到</p>
+      <div class="input-group">
+        <input type="text" class="input" id="userName" placeholder="输入姓名（如：郭晓飞）">
+      </div>
+      <button class="btn btn-primary btn-block mt-2" onclick="confirmName()">&#x2705; 下一步</button>
+    </div>
+
+    <!-- Step 3: Camera -->
     <div id="stepCamera" class="hidden">
       <p style="font-size:0.9rem;margin-bottom:12px">请将面部对准框内，光线充足时效果最佳</p>
       <div class="camera-container">
@@ -129,7 +138,7 @@ function getLocation() {
         if (d.within_range) {
           result.innerHTML = `<div class="badge badge-success">&#x2705; 在范围内 (${d.distance_meters}m / 允许${d.max_meters}m)</div><p style="font-size:0.8rem;margin-top:4px;color:var(--ink-muted)">${d.address || ''}</p>`;
           locationVerified = true;
-          showStep2();
+          showNameStep();
         } else {
           result.innerHTML = `<div class="badge badge-danger">&#x274c; 超出范围 (${d.distance_meters}m / 允许${d.max_meters}m)</div>`;
           locationVerified = false;
@@ -137,7 +146,7 @@ function getLocation() {
       } else {
         locationVerified = true;
         result.innerHTML = `<div class="badge badge-success">&#x2705; 定位成功</div>`;
-        showStep2();
+        showNameStep();
       }
       btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
     },
@@ -173,13 +182,13 @@ function loadGaodeLocation(btn, result, badge) {
               if (d.within_range) {
                 result.innerHTML = `<div class="badge badge-success">&#x2705; 在范围内 (${d.distance_meters}m / 允许${d.max_meters}m)</div><p style="font-size:0.8rem;margin-top:4px">${d.address || ''}</p>`;
                 locationVerified = true;
-                showStep2();
+                showNameStep();
               } else {
                 result.innerHTML = `<div class="badge badge-danger">&#x274c; 超出范围 (${d.distance_meters}m / 允许${d.max_meters}m)</div>`;
               }
             } else {
               locationVerified = true;
-              showStep2();
+              showNameStep();
             }
           } else {
             result.classList.remove('hidden');
@@ -193,10 +202,22 @@ function loadGaodeLocation(btn, result, badge) {
   document.head.appendChild(script);
 }
 
-function showStep2() {
+function showNameStep() {
   document.getElementById('stepLocation').classList.add('hidden');
+  document.getElementById('stepName').classList.remove('hidden');
+  document.getElementById('stepTitle').textContent = '第2步：确认身份';
+}
+
+function confirmName() {
+  const name = document.getElementById('userName').value.trim();
+  if (!name) return alert('请输入姓名');
+  showCameraStep();
+}
+
+function showCameraStep() {
+  document.getElementById('stepName').classList.add('hidden');
   document.getElementById('stepCamera').classList.remove('hidden');
-  document.getElementById('stepTitle').textContent = '第2步：人脸识别';
+  document.getElementById('stepTitle').textContent = '第3步：人脸识别';
   startCamera();
 }
 
@@ -239,6 +260,7 @@ async function submitCheckIn(b64, btn) {
         face_image_base64: b64,
         latitude: userLat,
         longitude: userLng,
+        user_name: document.getElementById('userName').value.trim(),
       }),
     });
     const data = await res.json();

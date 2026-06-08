@@ -68,10 +68,16 @@ async def validate_qr(token: str, db: AsyncSession = Depends(get_db)):
     if qr is None:
         return QRValidateResponse(valid=False, message="QR code expired or invalid")
 
+    # Eager-load location name to avoid lazy-load MissingGreenlet error
+    from models import Location
+    from sqlalchemy import select as sa_select
+    loc_result = await db.execute(sa_select(Location.name).where(Location.id == qr.location_id))
+    loc_name = loc_result.scalar_one_or_none()
+
     return QRValidateResponse(
         valid=True,
         type=qr.type,
-        location_name=qr.location.name if qr.location else None,
+        location_name=loc_name,
         expires_at=qr.expires_at,
         message="Valid",
     )
