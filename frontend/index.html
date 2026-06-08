@@ -38,26 +38,14 @@
       <div id="locResult" class="mt-2 hidden"></div>
     </div>
 
-    <!-- Step 2: Name input -->
+    <!-- Step 2: Confirm name -->
     <div id="stepName" class="hidden">
-      <p style="font-size:0.9rem;margin-bottom:12px">请输入你的姓名进行签到</p>
+      <p style="font-size:0.9rem;margin-bottom:12px">确认身份信息，点击签到</p>
       <div class="input-group">
-        <input type="text" class="input" id="userName" placeholder="输入姓名（如：郭晓飞）">
+        <input type="text" class="input" id="userName" placeholder="输入姓名（如：郭晓飞）" required>
       </div>
-      <button class="btn btn-primary btn-block mt-2" onclick="confirmName()">&#x2705; 下一步</button>
-    </div>
-
-    <!-- Step 3: Camera -->
-    <div id="stepCamera" class="hidden">
-      <p style="font-size:0.9rem;margin-bottom:12px">请将面部对准框内，光线充足时效果最佳</p>
-      <div class="camera-container">
-        <video id="video" autoplay playsinline></video>
-        <div class="camera-overlay"></div>
-        <div class="camera-hint">将面部对准虚线框</div>
-        <canvas id="canvas" class="hidden"></canvas>
-      </div>
-      <button class="btn btn-primary btn-block btn-lg mt-2" onclick="takePhoto()" id="captureBtn">&#x1f4f8; 拍照签到</button>
-      <div id="captureResult" class="text-center mt-2 hidden"></div>
+      <button class="btn btn-primary btn-block btn-lg mt-3" onclick="submitByName()" id="checkinBtn">&#x2705; 确认签到</button>
+      <div id="checkinResult" class="text-center mt-3 hidden"></div>
     </div>
   </div>
 
@@ -205,50 +193,18 @@ function loadGaodeLocation(btn, result, badge) {
 function showNameStep() {
   document.getElementById('stepLocation').classList.add('hidden');
   document.getElementById('stepName').classList.remove('hidden');
-  document.getElementById('stepTitle').textContent = '第2步：确认身份';
+  document.getElementById('stepTitle').textContent = '第2步：确认签到';
 }
 
-function confirmName() {
+async function submitByName() {
   const name = document.getElementById('userName').value.trim();
   if (!name) return alert('请输入姓名');
-  showCameraStep();
-}
 
-function showCameraStep() {
-  document.getElementById('stepName').classList.add('hidden');
-  document.getElementById('stepCamera').classList.remove('hidden');
-  document.getElementById('stepTitle').textContent = '第3步：人脸识别';
-  startCamera();
-}
-
-async function startCamera() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'user', width: {ideal: 640}, height: {ideal: 480}}});
-    document.getElementById('video').srcObject = stream;
-  } catch (e) {
-    document.getElementById('captureResult').classList.remove('hidden');
-    document.getElementById('captureResult').innerHTML = '<div class="badge badge-danger">无法访问摄像头: ' + e.message + '</div>';
-  }
-}
-
-function takePhoto() {
-  const btn = document.getElementById('captureBtn');
-  btn.disabled = true; btn.textContent = '处理中...';
-
-  const video = document.getElementById('video');
-  const canvas = document.getElementById('canvas');
-  canvas.width = video.videoWidth || 640;
-  canvas.height = video.videoHeight || 480;
-  canvas.getContext('2d').drawImage(video, 0, 0);
-  const b64 = canvas.toDataURL('image/jpeg', 0.85);
-
-  submitCheckIn(b64, btn);
-}
-
-async function submitCheckIn(b64, btn) {
-  const result = document.getElementById('captureResult');
+  const btn = document.getElementById('checkinBtn');
+  const result = document.getElementById('checkinResult');
+  btn.disabled = true; btn.textContent = '签到中...';
   result.classList.remove('hidden');
-  result.innerHTML = '<div class="spinner" style="margin:0 auto"></div><p class="mt-1">人脸识别中...</p>';
+  result.innerHTML = '<div class="spinner" style="margin:0 auto"></div><p class="mt-1">正在签到...</p>';
 
   const endpoint = qrType === 'checkout' ? '/api/check/out' : '/api/check/in';
   try {
@@ -257,32 +213,33 @@ async function submitCheckIn(b64, btn) {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
         token: token,
-        face_image_base64: b64,
+        face_image_base64: '',
         latitude: userLat,
         longitude: userLng,
-        user_name: document.getElementById('userName').value.trim(),
+        user_name: name,
       }),
     });
     const data = await res.json();
 
     if (res.ok) {
-      result.innerHTML = `<div class="badge badge-success" style="font-size:1.1rem">&#x2705; ${qrType === 'checkout' ? '签退成功' : '签到成功'}!</div>
-        <p class="mt-1">${data.user_name}</p>
-        <p style="font-size:0.8rem;color:var(--ink-muted)">时间: ${new Date(data.check_in_time).toLocaleString()}</p>`;
-      // Update status card
+      result.innerHTML = `<div class="badge badge-success" style="font-size:1.2rem">&#x2705; ${qrType === 'checkout' ? '签退成功' : '签到成功'}!</div>
+        <p class="mt-1" style="font-size:1.1rem;font-weight:700">${data.user_name}</p>
+        <p style="font-size:0.82rem;color:var(--ink-muted)">时间: ${new Date(data.check_in_time).toLocaleString()}</p>
+        <p style="font-size:0.82rem;color:var(--ink-muted)">地点: ${data.location_name || '—'}</p>`;
       if (qrType === 'checkin') {
         document.getElementById('statusCard').classList.remove('hidden');
         document.getElementById('statusTitle').textContent = '已签到';
         document.getElementById('statusDetail').textContent = `${data.user_name} — ${data.location_name || ''}`;
         document.getElementById('statusTime').textContent = `签到时间: ${new Date(data.check_in_time).toLocaleString()}`;
       }
+      document.getElementById('mainCard').classList.add('hidden');
     } else {
       result.innerHTML = `<div class="badge badge-danger">&#x274c; ${data.detail || '操作失败'}</div>`;
-      btn.disabled = false; btn.textContent = '&#x1f4f8; 重新拍照';
+      btn.disabled = false; btn.textContent = '&#x2705; 确认签到';
     }
   } catch (e) {
     result.innerHTML = `<div class="badge badge-danger">网络错误: ${e.message}</div>`;
-    btn.disabled = false; btn.textContent = '&#x1f4f8; 重新拍照';
+    btn.disabled = false; btn.textContent = '&#x2705; 确认签到';
   }
 }
 

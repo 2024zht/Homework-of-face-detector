@@ -47,23 +47,23 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
     location, distance = await _verify_location(req.latitude, req.longitude, qr.location_id, db)
     location_name = await reverse_geocode(req.latitude, req.longitude)
 
-    # 3. Face recognition — find matching user
-    embedding = extract_embedding_from_base64(req.face_image_base64)
-    if embedding is None:
-        raise HTTPException(status_code=400, detail="No face detected in image")
+    # 3. Identify user: face recognition OR name match
+    user_id = None
 
-    # Get all users with registered faces
-    user_stmt = select(User.id, User.face_embedding).where(
-        User.face_embedding.isnot(None),
-        User.is_active == True,
-    )
-    user_result = await db.execute(user_stmt)
-    candidates = [(row[0], row[1]) for row in user_result.fetchall()]
+    # Try face recognition if image provided
+    if req.face_image_base64 and req.face_image_base64.strip():
+        embedding = extract_embedding_from_base64(req.face_image_base64)
+        if embedding is not None:
+            user_stmt = select(User.id, User.face_embedding).where(
+                User.face_embedding.isnot(None),
+                User.is_active == True,
+            )
+            user_result = await db.execute(user_stmt)
+            candidates = [(row[0], row[1]) for row in user_result.fetchall()]
+            user_id = match_face(embedding, candidates)
 
-    user_id = match_face(embedding, candidates)
-
-    # Fallback: if face not recognized but user provided a name, match by name
-    if user_id is None and getattr(req, 'user_name', None):
+    # Name-based matching (primary for QR scan, fallback for video)
+    if user_id is None and getattr(req, 'user_name', None) and req.user_name.strip():
         name_stmt = select(User.id).where(
             User.name == req.user_name.strip(),
             User.is_active == True,
@@ -74,7 +74,7 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
             user_id = user_row[0]
 
     if user_id is None:
-        raise HTTPException(status_code=400, detail="Face not recognized")
+        raise HTTPException(status_code=400, detail="用户未找到，请检查姓名是否正确")
 
     # 4. Check if user already has an active check-in
     active_stmt = select(CheckIn).where(
@@ -86,9 +86,11 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
     if active_checkin is not None:
         raise HTTPException(status_code=400, detail="Already checked in. Please check out first.")
 
-    # 5. Save check-in photo
-    photo_filename = f"checkin_{user_id}_{uuid.uuid4().hex[:8]}.jpg"
-    photo_path = save_checkin_photo(req.face_image_base64, photo_filename)
+    # 5. Save check-in photo (if provided)
+    photo_path = None
+    if req.face_image_base64 and req.face_image_base64.strip():
+        photo_filename = f"checkin_{user_id}_{uuid.uuid4().hex[:8]}.jpg"
+        photo_path = save_checkin_photo(req.face_image_base64, photo_filename)
 
     # 6. Record check-in
     checkin = CheckIn(
