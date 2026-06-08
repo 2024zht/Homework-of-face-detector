@@ -41,8 +41,9 @@ async def generate_qr(
     if location is None:
         raise HTTPException(status_code=404, detail="Location not found")
 
-    # Determine base URL from request
-    base_url = str(request.base_url).rstrip("/")
+    # Use the configured public base URL (cpolar tunnel), not localhost
+    from config import BASE_URL
+    base_url = BASE_URL.rstrip("/")
 
     session, filename = await generate_qr_session(
         db=db,
