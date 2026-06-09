@@ -101,11 +101,16 @@ function getLocation() {
   const btn = document.getElementById('locBtn');
   const badge = document.getElementById('locationBadge');
   const result = document.getElementById('locResult');
-  btn.disabled = true; btn.textContent = '定位中...'; badge.classList.remove('hidden');
+  btn.disabled = true; btn.textContent = '定位中...';
+  badge.classList.remove('hidden');
+  badge.className = 'badge badge-warning'; badge.textContent = '定位中...';
+  result.classList.add('hidden');
 
   if (!navigator.geolocation) {
-    // Try Gaode JS API
-    loadGaodeLocation(btn, result, badge);
+    result.classList.remove('hidden');
+    result.innerHTML = `<div class="badge badge-danger">&#x274c; 浏览器不支持定位，请使用系统浏览器打开</div>`;
+    badge.className = 'badge badge-danger'; badge.textContent = '不支持';
+    btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
     return;
   }
 
@@ -113,23 +118,28 @@ function getLocation() {
     async (pos) => {
       userLat = pos.coords.latitude;
       userLng = pos.coords.longitude;
-      badge.className = 'badge badge-success'; badge.textContent = `已定位 (${pos.coords.accuracy.toFixed(0)}m)`;
+      const acc = pos.coords.accuracy || 50;
+      badge.className = 'badge badge-success';
+      badge.textContent = `已定位 (精度约${acc.toFixed(0)}m)`;
 
+      result.classList.remove('hidden');
       if (locationId) {
-        const r = await fetch(`${API}/api/admin/validate-location`, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId)}),
-        });
-        const d = await r.json();
-        result.classList.remove('hidden');
-        if (d.within_range) {
-          result.innerHTML = `<div class="badge badge-success">&#x2705; 在范围内 (${d.distance_meters}m / 允许${d.max_meters}m)</div><p style="font-size:0.8rem;margin-top:4px;color:var(--ink-muted)">${d.address || ''}</p>`;
-          locationVerified = true;
-          showNameStep();
-        } else {
-          result.innerHTML = `<div class="badge badge-danger">&#x274c; 超出范围 (${d.distance_meters}m / 允许${d.max_meters}m)</div>`;
-          locationVerified = false;
+        try {
+          const r = await fetch(`${API}/api/admin/validate-location`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId)}),
+          });
+          const d = await r.json();
+          if (d.within_range) {
+            result.innerHTML = `<div class="badge badge-success">&#x2705; 在范围内 (${d.distance_meters}m / 允许${d.max_meters}m)</div><p style="font-size:0.78rem;margin-top:4px;color:var(--ink-muted)">${d.address || ''}</p>`;
+            locationVerified = true;
+            showNameStep();
+          } else {
+            result.innerHTML = `<div class="badge badge-danger">&#x274c; 超出范围 (${d.distance_meters}m / 允许${d.max_meters}m)</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试</button>`;
+          }
+        } catch (e) {
+          result.innerHTML = `<div class="badge badge-danger">网络错误，请重试</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试</button>`;
         }
       } else {
         locationVerified = true;
@@ -139,55 +149,20 @@ function getLocation() {
       btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
     },
     (err) => {
-      loadGaodeLocation(btn, result, badge);
+      result.classList.remove('hidden');
+      badge.className = 'badge badge-danger'; badge.textContent = '定位失败';
+      let msg = '';
+      switch (err.code) {
+        case 1: msg = '请允许浏览器获取位置权限后重试'; break;
+        case 2: msg = '无法获取位置，请确保已开启GPS和网络'; break;
+        case 3: msg = '定位超时，请检查网络后重试'; break;
+        default: msg = err.message || '定位失败';
+      }
+      result.innerHTML = `<div class="badge badge-danger">&#x274c; ${msg}</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试定位</button>`;
+      btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
     },
-    {enableHighAccuracy: true, timeout: 15000, maximumAge: 60000}
+    {enableHighAccuracy: true, timeout: 15000, maximumAge: 120000}
   );
-}
-
-function loadGaodeLocation(btn, result, badge) {
-  // Fallback: try Gaode JS API
-  const script = document.createElement('script');
-  script.src = 'https://webapi.amap.com/maps?v=2.0&key=c8e18f605b4553734875dbc4d172be96&plugin=AMap.Geolocation';
-  script.onload = function() {
-    if (window.AMap) {
-      window.AMap.plugin('AMap.Geolocation', function() {
-        const geo = new window.AMap.Geolocation({enableHighAccuracy: true, timeout: 10000});
-        geo.getCurrentPosition(async (status, result) => {
-          if (status === 'complete' && result.position) {
-            userLat = result.position.lat;
-            userLng = result.position.lng;
-            badge.className = 'badge badge-success'; badge.textContent = `高德定位 (${result.accuracy?.toFixed(0) || '?'}m)`;
-
-            if (locationId) {
-              const r = await fetch(`${API}/api/admin/validate-location`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId)}),
-              });
-              const d = await r.json();
-              result.classList.remove('hidden');
-              if (d.within_range) {
-                result.innerHTML = `<div class="badge badge-success">&#x2705; 在范围内 (${d.distance_meters}m / 允许${d.max_meters}m)</div><p style="font-size:0.8rem;margin-top:4px">${d.address || ''}</p>`;
-                locationVerified = true;
-                showNameStep();
-              } else {
-                result.innerHTML = `<div class="badge badge-danger">&#x274c; 超出范围 (${d.distance_meters}m / 允许${d.max_meters}m)</div>`;
-              }
-            } else {
-              locationVerified = true;
-              showNameStep();
-            }
-          } else {
-            result.classList.remove('hidden');
-            result.innerHTML = `<div class="badge badge-danger">&#x274c; 定位失败: 请确保已开启GPS和WiFi</div>`;
-          }
-          btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
-        });
-      });
-    }
-  };
-  document.head.appendChild(script);
 }
 
 function showNameStep() {
