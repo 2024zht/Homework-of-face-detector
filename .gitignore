@@ -28,3 +28,4 @@ static/qrcodes/*.png
 static/photos/*.jpg
 !static/qrcodes/.gitkeep
 !static/photos/.gitkeep
+*.docx
