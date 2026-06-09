@@ -84,13 +84,19 @@ var userLat = null, userLng = null, locationVerified = false;
   }
 })();
 
+var _watchId = null;
+
 function getLocation() {
   var btn = document.getElementById('locBtn');
   var badge = document.getElementById('locationBadge');
   var result = document.getElementById('locResult');
+
+  // Stop any existing watch
+  if (_watchId !== null) { navigator.geolocation.clearWatch(_watchId); _watchId = null; }
+
   btn.disabled = true; btn.textContent = '定位中...';
   badge.classList.remove('hidden');
-  badge.className = 'badge badge-warning'; badge.textContent = '定位中...';
+  badge.className = 'badge badge-warning'; badge.textContent = '正在搜索卫星信号...';
   result.classList.add('hidden');
 
   if (!navigator.geolocation) {
@@ -101,63 +107,113 @@ function getLocation() {
     return;
   }
 
-  // Show "searching" after 5s
-  var searchTimer = setTimeout(function() {
-    badge.textContent = '正在搜索卫星信号...';
+  var startTime = Date.now();
+  var bestPos = null;
+  var count = 0;
+
+  // Update status every 5 seconds
+  var statusTimer = setInterval(function() {
+    var elapsed = Math.floor((Date.now() - startTime) / 1000);
+    badge.textContent = '搜索卫星中... (' + elapsed + '秒)';
   }, 5000);
 
-  navigator.geolocation.getCurrentPosition(
+  // Use watchPosition: keeps GPS active until we get a good fix
+  _watchId = navigator.geolocation.watchPosition(
     function(pos) {
-      clearTimeout(searchTimer);
-      userLat = pos.coords.latitude;
-      userLng = pos.coords.longitude;
-      var acc = pos.coords.accuracy || 50;
-      badge.className = 'badge badge-success';
-      badge.textContent = '已定位 (精度约' + acc.toFixed(0) + 'm)';
-      result.classList.remove('hidden');
+      count++;
+      var acc = pos.coords.accuracy || 999;
+      // Keep the best accuracy reading
+      if (!bestPos || acc < bestPos.accuracy) {
+        bestPos = {lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: acc};
+      }
 
-      if (locationId) {
-        fetch(API + '/api/admin/validate-location', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId)}),
-        })
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-          if (d.within_range) {
-            result.innerHTML = '<div class="badge badge-success">&#x2705; 在范围内 (' + d.distance_meters + 'm / 允许' + d.max_meters + 'm)</div><p style="font-size:0.78rem;margin-top:4px;color:var(--ink-muted)">' + (d.address || '') + '</p>';
-            locationVerified = true;
-            showNameStep();
-          } else {
-            result.innerHTML = '<div class="badge badge-danger">&#x274c; 超出范围 (' + d.distance_meters + 'm / 允许' + d.max_meters + 'm)</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试</button>';
-          }
-          btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
-        })
-        .catch(function(e) {
-          result.innerHTML = '<div class="badge badge-danger">网络错误，请重试</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试</button>';
-          btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
-        });
-      } else {
-        locationVerified = true;
-        result.innerHTML = '<div class="badge badge-success">&#x2705; 定位成功</div>';
-        showNameStep();
-        btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
+      // Update badge with progress
+      var elapsed = Math.floor((Date.now() - startTime) / 1000);
+      badge.textContent = 'GPS信号: ' + acc.toFixed(0) + 'm精度 (' + elapsed + '秒)';
+
+      // Good enough — stop and use this position
+      if (acc <= 80) {
+        navigator.geolocation.clearWatch(_watchId);
+        _watchId = null;
+        clearInterval(statusTimer);
+        usePosition(bestPos, badge, result, btn);
       }
     },
     function(err) {
-      clearTimeout(searchTimer);
+      navigator.geolocation.clearWatch(_watchId);
+      _watchId = null;
+      clearInterval(statusTimer);
       result.classList.remove('hidden');
       badge.className = 'badge badge-danger'; badge.textContent = '定位失败';
       var msg = '';
       if (err.code === 1) msg = '请允许浏览器获取位置权限后重试';
-      else if (err.code === 2) msg = '无法获取位置，请确保已开启GPS和网络';
-      else if (err.code === 3) msg = '定位超时，请检查网络后重试';
+      else if (err.code === 2) msg = '无法获取位置信号，请移至窗边或室外';
+      else if (err.code === 3) msg = '定位超时，请重试';
       else msg = err.message || '定位失败';
       result.innerHTML = '<div class="badge badge-danger">&#x274c; ' + msg + '</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试定位</button>';
       btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
     },
-    {enableHighAccuracy: true, timeout: 30000, maximumAge: 0}
+    {enableHighAccuracy: true, timeout: 120000, maximumAge: 0}
   );
+
+  // Timeout after 90 seconds — use best available reading
+  setTimeout(function() {
+    if (_watchId !== null) {
+      navigator.geolocation.clearWatch(_watchId);
+      _watchId = null;
+      clearInterval(statusTimer);
+
+      if (bestPos && bestPos.accuracy <= 200) {
+        usePosition(bestPos, badge, result, btn);
+      } else if (bestPos) {
+        result.classList.remove('hidden');
+        badge.className = 'badge badge-warning'; badge.textContent = '精度不足';
+        result.innerHTML = '<div class="badge badge-warning">&#x26a0; 精度仅' + bestPos.accuracy.toFixed(0) + 'm，建议移至窗边或室外重试</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试定位</button>';
+        btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
+      } else {
+        result.classList.remove('hidden');
+        badge.className = 'badge badge-danger'; badge.textContent = '定位失败';
+        result.innerHTML = '<div class="badge badge-danger">&#x274c; 未获取到GPS信号，请移至窗边或室外</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试定位</button>';
+        btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
+      }
+    }
+  }, 90000);
+}
+
+function usePosition(pos, badge, result, btn) {
+  userLat = pos.lat;
+  userLng = pos.lng;
+  badge.className = 'badge badge-success';
+  badge.textContent = '已定位 (精度' + pos.accuracy.toFixed(0) + 'm)';
+  result.classList.remove('hidden');
+
+  if (locationId) {
+    fetch(API + '/api/admin/validate-location', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId)}),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.within_range) {
+        result.innerHTML = '<div class="badge badge-success">&#x2705; 在范围内 (' + d.distance_meters + 'm / 允许' + d.max_meters + 'm)</div><p style="font-size:0.78rem;margin-top:4px;color:var(--ink-muted)">' + (d.address || '') + '</p>';
+        locationVerified = true;
+        showNameStep();
+      } else {
+        result.innerHTML = '<div class="badge badge-danger">&#x274c; 超出范围 (' + d.distance_meters + 'm / 允许' + d.max_meters + 'm)</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试</button>';
+      }
+      btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
+    })
+    .catch(function(e) {
+      result.innerHTML = '<div class="badge badge-danger">网络错误，请重试</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试</button>';
+      btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
+    });
+  } else {
+    locationVerified = true;
+    result.innerHTML = '<div class="badge badge-success">&#x2705; 定位成功</div>';
+    showNameStep();
+    btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
+  }
 }
 
 function showNameStep() {
