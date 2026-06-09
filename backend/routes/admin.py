@@ -4,6 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
+from sqlalchemy.orm import selectinload
 from typing import Optional
 
 from database import get_db
@@ -214,7 +215,7 @@ async def get_statistics(
     total_users = total_result.scalar() or 0
 
     # Today's check-ins
-    ci_stmt = select(CheckIn).where(
+    ci_stmt = select(CheckIn).options(selectinload(CheckIn.user)).where(
         CheckIn.check_in_time >= day_start,
         CheckIn.check_in_time <= day_end,
     )
@@ -266,7 +267,7 @@ async def list_checkins(
     db: AsyncSession = Depends(get_db),
     _admin=Depends(get_current_admin),
 ):
-    stmt = select(CheckIn)
+    stmt = select(CheckIn).options(selectinload(CheckIn.user))
     if date:
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
         day_start = datetime(target_date.year, target_date.month, target_date.day)

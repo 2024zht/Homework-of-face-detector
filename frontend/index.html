@@ -249,7 +249,7 @@ function submitByName() {
   })
   .then(function(r) {
     if (r.ok) {
-      result.innerHTML = '<div class="badge badge-success" style="font-size:1.2rem">&#x2705; ' + (qrType === 'checkout' ? '签退成功' : '签到成功') + '!</div><p class="mt-1" style="font-size:1.1rem;font-weight:700">' + r.data.user_name + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">时间: ' + new Date(r.data.check_in_time).toLocaleString() + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">地点: ' + (r.data.location_name || '-') + '</p>';
+      result.innerHTML = '<div class="badge badge-success" style="font-size:1.2rem">&#x2705; ' + (qrType === 'checkout' ? '签退成功' : '签到成功') + '!</div><p class="mt-1" style="font-size:1.1rem;font-weight:700">' + r.data.user_name + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">时间: ' + new Date(r.data.check_in_time).toLocaleString() + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">地点: ' + (r.data.location_name || '-') + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">距离签到点: ' + (r.data.distance_meters || '?') + 'm</p>';
       if (qrType === 'checkin') {
         document.getElementById('statusCard').classList.remove('hidden');
         document.getElementById('statusTitle').textContent = '已签到';

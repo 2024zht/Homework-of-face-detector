@@ -115,14 +115,15 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(checkin)
 
-    return CheckInResponse(
-        id=checkin.id,
-        user_name=user.name,
-        check_in_time=checkin.check_in_time,
-        check_out_time=None,
-        status="active",
-        location_name=location.name,
-    )
+    return {
+        "id": checkin.id,
+        "user_name": user.name,
+        "check_in_time": checkin.check_in_time.isoformat(),
+        "check_out_time": None,
+        "status": "active",
+        "location_name": location.name,
+        "distance_meters": round(distance, 1),
+    }
 
 
 @router.post("/out", response_model=CheckInResponse)
