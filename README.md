@@ -32,44 +32,137 @@
 
 ### 环境要求
 
-- Windows 10/11 + NVIDIA GPU (推荐 RTX 3060+)
-- Conda (Miniconda 或 Anaconda)
-- Python 3.10
-- Node.js (cpolar 可选)
+- Windows 10/11 + NVIDIA GPU（推荐 RTX 3060+，8GB 显存）
+- [Miniconda](https://docs.conda.io/en/latest/miniconda.html) 或 Anaconda
+- [cpolar](https://www.cpolar.com/)（HTTPS 穿透，手机扫码必需）
 
-### 安装
+### 一键部署（推荐）
 
 ```bash
 # 1. 克隆仓库
 git clone https://github.com/2024zht/Homework-of-face-detector.git
 cd Homework-of-face-detector
 
-# 2. 创建 conda 环境
-conda create -n facedetector python=3.10 -y
+# 2. 从 environment.yml 创建完全一致的 conda 环境
+conda env create -f environment.yml
 conda activate facedetector
 
-# 3. 安装依赖
-pip install -r requirements.txt
+# 3. 安装 insightface（需从 GitHub 获取）
+git clone https://github.com/deepinsight/insightface.git
+cd insightface/python-package
+pip install -e .
+cd ../../Homework-of-face-detector
 
 # 4. 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入高德 API Key 等配置
+# 编辑 .env，填入高德 API Key 和 cpolar URL
 
 # 5. 启动
+python run.py
+```
+
+### 手动安装（如果 environment.yml 不可用）
+
+```bash
+# 1. 创建环境
+conda create -n facedetector python=3.10 -y
+conda activate facedetector
+
+# 2. 安装 Python 依赖
+pip install -r requirements.txt
+
+# 3. 安装 GPU 推理环境（CUDA + cuDNN）
+pip install onnxruntime-gpu==1.20.2 nvidia-cudnn-cu12 nvidia-cublas-cu12 nvidia-cuda-nvrtc-cu12
+# Windows 需要手动复制 cuDNN DLL
+python -c "
+import shutil, os, sys
+site = os.path.join(os.path.dirname(sys.executable), 'lib', 'site-packages')
+src = os.path.join(site, 'nvidia', 'cudnn', 'bin', 'cudnn64_9.dll')
+dst = os.path.join(site, 'onnxruntime', 'capi', 'cudnn64_9.dll')
+if os.path.exists(src) and not os.path.exists(dst):
+    shutil.copy2(src, dst); print('cuDNN DLL installed')
+"
+
+# 4. 安装 insightface
+git clone https://github.com/deepinsight/insightface.git
+cd insightface/python-package && pip install -e . && cd ../..
+
+# 5. 配置并启动
+cp .env.example .env
 python run.py
 ```
 
 ### 配置 .env
 
 ```bash
-CHECKIN_SECRET_KEY=your-secret-key          # JWT 签名密钥
-AMAP_KEY=your-amap-web-js-api-key          # 高德 Web端(JS API) Key
-AMAP_SECURITY_KEY=your-amap-security-key    # 高德安全密钥
+CHECKIN_SECRET_KEY=随机字符串               # JWT 签名密钥
+AMAP_KEY=你的高德Key                        # 高德 Web端(JS API)
+AMAP_SECURITY_KEY=你的高德安全密钥           # 高德安全密钥
 CHECKIN_BASE_URL=https://xxx.cpolar.top     # cpolar HTTPS URL
 LAB_LAT=36.547308                           # 实验室纬度 (GCJ-02)
 LAB_LNG=116.83223                           # 实验室经度 (GCJ-02)
 LAB_NAME=实验室                             # 签到点名称
 ```
+
+## 部署架构
+
+```
+手机浏览器 (HTTPS)
+    │
+    ▼
+cpolar 隧道 (https://xxx.cpolar.top)
+    │
+    ▼
+localhost:8080 (FastAPI + uvicorn)
+    │
+    ├── SQLite (checkin.db)
+    ├── insightface GPU (人脸识别)
+    └── 高德 API (逆地理编码)
+```
+
+### 启动 cpolar 隧道
+
+```bash
+# 下载: https://www.cpolar.com/download
+.\cpolar http 8080
+# 复制输出的 HTTPS URL 到 .env 的 CHECKIN_BASE_URL
+```
+
+### 首次使用步骤
+
+1. `python run.py` 启动服务器
+2. 浏览器打开 `http://localhost:8080` → 自动跳转登录页
+3. 管理员 `admin` / `admin123` 登录
+4. "签到点" → 添加实验室坐标（[高德坐标拾取器](https://lbs.amap.com/tools/picker)）
+5. "人员管理" → 添加学生 → 上传正面照注册人脸
+6. "生成二维码" → 展示在大屏上
+7. 学生手机扫码 → 定位校验 → 输入姓名 → 签到成功
+
+### 生产环境部署
+
+```bash
+# Linux (gunicorn)
+gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8080
+
+# Windows (uvicorn)
+python -m uvicorn main:app --host 0.0.0.0 --port 8080
+```
+
+### 环境变量完整列表
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `CHECKIN_SECRET_KEY` | JWT 签名密钥 | change-me-in-production |
+| `AMAP_KEY` | 高德 Web JS API Key | — |
+| `AMAP_SECURITY_KEY` | 高德安全密钥 | — |
+| `CHECKIN_BASE_URL` | cpolar HTTPS URL | http://localhost:8080 |
+| `LAB_LAT` | 实验室纬度 (GCJ-02) | 36.547308 |
+| `LAB_LNG` | 实验室经度 (GCJ-02) | 116.83223 |
+| `LAB_NAME` | 签到点名称 | 实验室 |
+
+### 坐标系统说明
+
+手机 GPS 返回 WGS-84 坐标，高德地图使用 GCJ-02（国测局加密）。系统会自动转换，无需手动处理。在[高德坐标拾取器](https://lbs.amap.com/tools/picker)上获取的坐标直接填入 `.env` 即可。
 
 ## 项目结构
 
