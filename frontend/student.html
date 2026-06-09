@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我的签到 — Lab Check-in</title>
+<link rel="stylesheet" href="/frontend/css/app.css">
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-brand">&#x1f3e2; 实验室签到</div>
+  <div class="topbar-nav">
+    <span id="userName" style="font-size:0.85rem;color:var(--ink-secondary)"></span>
+    <button onclick="logout()">退出</button>
+  </div>
+</div>
+
+<div class="container">
+  <div class="card text-center" id="statusCard" style="padding:32px">
+    <div style="font-size:3rem" id="statusIcon">&#x23f3;</div>
+    <h2 class="mt-2" id="statusTitle">加载中...</h2>
+    <p id="statusDetail" style="font-size:0.9rem"></p>
+    <p id="statusTime" style="font-size:0.82rem;color:var(--ink-muted)"></p>
+  </div>
+
+  <div class="card text-center mt-2" style="padding:20px">
+    <p style="font-size:0.9rem;color:var(--ink-secondary);margin-bottom:12px">需要签到？扫描实验室大屏上的二维码</p>
+    <button class="btn btn-primary btn-lg" onclick="window.open('/checkin.html','_blank')">&#x1f4f7; 打开扫码签到</button>
+  </div>
+
+  <div class="card mt-2">
+    <h3 class="mb-2">&#x1f4dd; 我的签到记录</h3>
+    <div class="table-wrap" id="historyTable">
+      <p style="color:var(--ink-muted);text-align:center;padding:20px">加载中...</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+const TOKEN = localStorage.getItem('token');
+const USER = JSON.parse(localStorage.getItem('user') || '{}');
+if (!TOKEN) window.location.href = '/login.html';
+document.getElementById('userName').textContent = USER.name || USER.username;
+
+async function api(url, opts = {}) {
+  opts.headers = {...opts.headers, 'Authorization': 'Bearer ' + TOKEN};
+  const r = await fetch(API + url, opts);
+  if (r.status === 401) { localStorage.clear(); window.location.href = '/login.html'; }
+  return r;
+}
+
+(async function() {
+  const r = await api(`/api/check/status?user_id=${USER.id}`);
+  const d = await r.json();
+  if (d.is_checked_in) {
+    document.getElementById('statusIcon').innerHTML = '&#x2705;';
+    document.getElementById('statusTitle').textContent = '当前已签到';
+    document.getElementById('statusDetail').textContent = `地点: ${d.location_name || '—'}`;
+    let t = `签到时间: ${new Date(d.check_in_time).toLocaleString()}`;
+    if (d.auto_checkout_at) t += ` | 自动签退: ${new Date(d.auto_checkout_at).toLocaleTimeString()}`;
+    document.getElementById('statusTime').textContent = t;
+  } else {
+    document.getElementById('statusIcon').innerHTML = '&#x274c;';
+    document.getElementById('statusTitle').textContent = '未签到';
+    document.getElementById('statusDetail').textContent = '请扫描实验室大屏上的二维码';
+  }
+
+  const r2 = await api(`/api/admin/checkins?user_id=${USER.id}`);
+  const records = await r2.json();
+  if (records.length === 0) {
+    document.getElementById('historyTable').innerHTML = '<p style="color:var(--ink-muted);text-align:center;padding:20px">暂无签到记录</p>';
+  } else {
+    document.getElementById('historyTable').innerHTML = `<table><thead><tr><th>日期</th><th>签到</th><th>签退</th><th>地点</th><th>时长</th></tr></thead><tbody>
+    ${records.slice(0,30).map(r => `<tr>
+      <td>${new Date(r.check_in_time).toLocaleDateString()}</td>
+      <td>${new Date(r.check_in_time).toLocaleTimeString()}</td>
+      <td>${r.check_out_time ? new Date(r.check_out_time).toLocaleTimeString() : '—'}</td>
+      <td>${r.location_name || '—'}</td>
+      <td>${r.check_out_time ? Math.round((new Date(r.check_out_time)-new Date(r.check_in_time))/60000)+'min' : '进行中'}</td>
+    </tr>`).join('')}</tbody></table>`;
+  }
+})();
+
+function logout() { localStorage.clear(); window.location.href = '/login.html'; }
+</script>
+</body>
+</html>

@@ -34,7 +34,7 @@ QRCODE_DIR = os.path.join(STATIC_DIR, "qrcodes")
 # Server
 HOST = "0.0.0.0"
 PORT = 8080
-BASE_URL = os.getenv("CHECKIN_BASE_URL", "http://localhost:8080")
+BASE_URL = os.getenv("CHECKIN_BASE_URL", "https://375eace6.r6.cpolar.top")
 
 # Default lab location (for QR code display)
 DEFAULT_LAB_LAT = float(os.getenv("LAB_LAT", "36.547308"))

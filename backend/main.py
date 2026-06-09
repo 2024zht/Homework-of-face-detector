@@ -72,7 +72,7 @@ app.mount("/frontend", StaticFiles(directory=FRONTEND_DIR), name="frontend")
 
 @app.get("/")
 async def root():
-    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+    return FileResponse(os.path.join(FRONTEND_DIR, "login.html"))
 
 
 @app.get("/checkin.html")
@@ -83,6 +83,11 @@ async def checkin_page():
 @app.get("/admin.html")
 async def admin_page():
     return FileResponse(os.path.join(FRONTEND_DIR, "admin.html"))
+
+
+@app.get("/student.html")
+async def student_page():
+    return FileResponse(os.path.join(FRONTEND_DIR, "student.html"))
 
 
 @app.get("/login.html")

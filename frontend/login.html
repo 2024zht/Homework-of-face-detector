@@ -59,7 +59,7 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
       if (data.user.role === 'admin' || data.user.role === 'instructor') {
         window.location.href = '/admin.html';
       } else {
-        window.location.href = '/';
+        window.location.href = '/student.html';
       }
     } else {
       msg.textContent = data.detail || '登录失败';
