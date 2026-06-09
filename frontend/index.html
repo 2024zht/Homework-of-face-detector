@@ -156,7 +156,7 @@ function getLocation() {
       result.innerHTML = '<div class="badge badge-danger">&#x274c; ' + msg + '</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试定位</button>';
       btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
     },
-    {enableHighAccuracy: true, timeout: 30000, maximumAge: 120000}
+    {enableHighAccuracy: true, timeout: 30000, maximumAge: 0}
   );
 }
 
