@@ -8,13 +8,11 @@
 </head>
 <body>
 <div class="container" id="app">
-  <!-- Header -->
   <div style="text-align:center;padding:20px 0 12px">
     <h1 style="color:var(--brand)">&#x1f3e2; 实验室签到</h1>
-    <p style="margin-top:4px">人脸识别 · 精准定位 · 安全快速</p>
+    <p style="margin-top:4px">精准定位 · 快速签到</p>
   </div>
 
-  <!-- Status card (shown when checked in) -->
   <div class="card result-card result-success hidden" id="statusCard">
     <div class="result-icon">&#x2705;</div>
     <h2 id="statusTitle">已签到</h2>
@@ -22,23 +20,18 @@
     <p class="mt-1" style="font-size:0.82rem;color:var(--ink-muted)" id="statusTime"></p>
   </div>
 
-  <!-- Main check-in card -->
   <div class="card" id="mainCard">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h3 id="stepTitle">第1步：验证位置</h3>
       <span class="badge badge-warning hidden" id="locationBadge">定位中...</span>
     </div>
 
-    <!-- Step 1: Location -->
     <div id="stepLocation">
       <p style="font-size:0.9rem;margin-bottom:12px">需要获取你的位置以确认在签到范围内</p>
-      <div class="flex gap-2">
-        <button class="btn btn-primary btn-block" onclick="getLocation()" id="locBtn">&#x1f4cd; 获取位置</button>
-      </div>
+      <button class="btn btn-primary btn-block" onclick="getLocation()" id="locBtn">&#x1f4cd; 获取位置</button>
       <div id="locResult" class="mt-2 hidden"></div>
     </div>
 
-    <!-- Step 2: Confirm name -->
     <div id="stepName" class="hidden">
       <p style="font-size:0.9rem;margin-bottom:12px">确认身份信息，点击签到</p>
       <div class="input-group">
@@ -49,58 +42,52 @@
     </div>
   </div>
 
-  <!-- Result -->
-  <div class="card hidden" id="resultCard"></div>
-
-  <!-- Token info -->
   <p class="text-center mt-2" style="font-size:0.75rem;color:var(--ink-muted)" id="tokenInfo"></p>
 </div>
 
 <script>
-const API = window.location.origin;
-let token = null, qrType = null, locationId = null;
-let userLat = null, userLng = null, locationVerified = false;
+var API = window.location.origin;
+var token = null, qrType = null, locationId = null;
+var userLat = null, userLng = null, locationVerified = false;
 
-// Parse URL params
 (function() {
-  const p = new URLSearchParams(window.location.search);
+  var p = new URLSearchParams(window.location.search);
   token = p.get('token');
   qrType = p.get('type') || 'checkin';
   locationId = p.get('location_id');
   if (token) {
-    document.getElementById('tokenInfo').textContent = `Session: ${token.slice(0,8)}... | Type: ${qrType}`;
-    // Validate token
-    fetch(`${API}/api/qr/validate/${token}`)
-      .then(r => r.json())
-      .then(d => {
+    document.getElementById('tokenInfo').textContent = 'Session: ' + token.slice(0,8) + '... | ' + qrType;
+    fetch(API + '/api/qr/validate/' + token)
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
         if (!d.valid) showToast('二维码已过期或无效', 'error');
-        else document.getElementById('stepTitle').textContent = `${d.location_name || '签到点'} — ${qrType === 'checkin' ? '签到' : '签退'}`;
+        else document.getElementById('stepTitle').textContent = (d.location_name || '签到点') + ' - ' + (qrType === 'checkin' ? '签到' : '签退');
       });
   }
 })();
 
-// Check existing status
-(async function() {
-  const u = JSON.parse(localStorage.getItem('user') || '{}');
+(function() {
+  var u = JSON.parse(localStorage.getItem('user') || '{}');
   if (u.id) {
-    const r = await fetch(`${API}/api/check/status?user_id=${u.id}`);
-    const d = await r.json();
-    if (d.is_checked_in) {
-      document.getElementById('statusCard').classList.remove('hidden');
-      document.getElementById('statusTitle').textContent = '当前已签到';
-      document.getElementById('statusDetail').textContent = `地点: ${d.location_name || '—'}`;
-      document.getElementById('statusTime').textContent = `签到时间: ${new Date(d.check_in_time).toLocaleString()}`;
-      if (d.auto_checkout_at) {
-        document.getElementById('statusTime').textContent += ` | 自动签退: ${new Date(d.auto_checkout_at).toLocaleString()}`;
-      }
-    }
+    fetch(API + '/api/check/status?user_id=' + u.id)
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.is_checked_in) {
+          document.getElementById('statusCard').classList.remove('hidden');
+          document.getElementById('statusTitle').textContent = '已签到';
+          document.getElementById('statusDetail').textContent = '地点: ' + (d.location_name || '-');
+          var t = '签到时间: ' + new Date(d.check_in_time).toLocaleString();
+          if (d.auto_checkout_at) t += ' | 自动签退: ' + new Date(d.auto_checkout_at).toLocaleTimeString();
+          document.getElementById('statusTime').textContent = t;
+        }
+      });
   }
 })();
 
 function getLocation() {
-  const btn = document.getElementById('locBtn');
-  const badge = document.getElementById('locationBadge');
-  const result = document.getElementById('locResult');
+  var btn = document.getElementById('locBtn');
+  var badge = document.getElementById('locationBadge');
+  var result = document.getElementById('locResult');
   btn.disabled = true; btn.textContent = '定位中...';
   badge.classList.remove('hidden');
   badge.className = 'badge badge-warning'; badge.textContent = '定位中...';
@@ -108,67 +95,68 @@ function getLocation() {
 
   if (!navigator.geolocation) {
     result.classList.remove('hidden');
-    result.innerHTML = `<div class="badge badge-danger">&#x274c; 浏览器不支持定位，请使用系统浏览器打开</div>`;
+    result.innerHTML = '<div class="badge badge-danger">&#x274c; 浏览器不支持定位</div>';
     badge.className = 'badge badge-danger'; badge.textContent = '不支持';
     btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
     return;
   }
 
+  // Show "searching" after 5s
+  var searchTimer = setTimeout(function() {
+    badge.textContent = '正在搜索卫星信号...';
+  }, 5000);
+
   navigator.geolocation.getCurrentPosition(
-    async (pos) => {
+    function(pos) {
+      clearTimeout(searchTimer);
       userLat = pos.coords.latitude;
       userLng = pos.coords.longitude;
-      const acc = pos.coords.accuracy || 50;
+      var acc = pos.coords.accuracy || 50;
       badge.className = 'badge badge-success';
-      badge.textContent = `已定位 (精度约${acc.toFixed(0)}m)`;
-
+      badge.textContent = '已定位 (精度约' + acc.toFixed(0) + 'm)';
       result.classList.remove('hidden');
+
       if (locationId) {
-        try {
-          const r = await fetch(`${API}/api/admin/validate-location`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId)}),
-          });
-          const d = await r.json();
+        fetch(API + '/api/admin/validate-location', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId)}),
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
           if (d.within_range) {
-            result.innerHTML = `<div class="badge badge-success">&#x2705; 在范围内 (${d.distance_meters}m / 允许${d.max_meters}m)</div><p style="font-size:0.78rem;margin-top:4px;color:var(--ink-muted)">${d.address || ''}</p>`;
+            result.innerHTML = '<div class="badge badge-success">&#x2705; 在范围内 (' + d.distance_meters + 'm / 允许' + d.max_meters + 'm)</div><p style="font-size:0.78rem;margin-top:4px;color:var(--ink-muted)">' + (d.address || '') + '</p>';
             locationVerified = true;
             showNameStep();
           } else {
-            result.innerHTML = `<div class="badge badge-danger">&#x274c; 超出范围 (${d.distance_meters}m / 允许${d.max_meters}m)</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试</button>`;
+            result.innerHTML = '<div class="badge badge-danger">&#x274c; 超出范围 (' + d.distance_meters + 'm / 允许' + d.max_meters + 'm)</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试</button>';
           }
-        } catch (e) {
-          result.innerHTML = `<div class="badge badge-danger">网络错误，请重试</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试</button>`;
-        }
+          btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
+        })
+        .catch(function(e) {
+          result.innerHTML = '<div class="badge badge-danger">网络错误，请重试</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试</button>';
+          btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
+        });
       } else {
         locationVerified = true;
-        result.innerHTML = `<div class="badge badge-success">&#x2705; 定位成功</div>`;
+        result.innerHTML = '<div class="badge badge-success">&#x2705; 定位成功</div>';
         showNameStep();
+        btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
       }
-      btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
     },
-    (err) => {
+    function(err) {
+      clearTimeout(searchTimer);
       result.classList.remove('hidden');
       badge.className = 'badge badge-danger'; badge.textContent = '定位失败';
-      let msg = '';
-      switch (err.code) {
-        case 1: msg = '请允许浏览器获取位置权限后重试'; break;
-        case 2: msg = '无法获取位置，请确保已开启GPS和网络'; break;
-        case 3: msg = '定位超时，请检查网络后重试'; break;
-        default: msg = err.message || '定位失败';
-      }
-      result.innerHTML = `<div class="badge badge-danger">&#x274c; ${msg}</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试定位</button>`;
+      var msg = '';
+      if (err.code === 1) msg = '请允许浏览器获取位置权限后重试';
+      else if (err.code === 2) msg = '无法获取位置，请确保已开启GPS和网络';
+      else if (err.code === 3) msg = '定位超时，请检查网络后重试';
+      else msg = err.message || '定位失败';
+      result.innerHTML = '<div class="badge badge-danger">&#x274c; ' + msg + '</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试定位</button>';
       btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
     },
     {enableHighAccuracy: true, timeout: 30000, maximumAge: 120000}
-
-  // Show progress after 5 seconds if still waiting
-  setTimeout(() => {
-    if (btn.disabled && badge.textContent === '定位中...') {
-      badge.textContent = '正在搜索卫星信号...';
-    }
-  }, 5000);
   );
 }
 
@@ -178,58 +166,58 @@ function showNameStep() {
   document.getElementById('stepTitle').textContent = '第2步：确认签到';
 }
 
-async function submitByName() {
-  const name = document.getElementById('userName').value.trim();
+function submitByName() {
+  var name = document.getElementById('userName').value.trim();
   if (!name) return alert('请输入姓名');
 
-  const btn = document.getElementById('checkinBtn');
-  const result = document.getElementById('checkinResult');
+  var btn = document.getElementById('checkinBtn');
+  var result = document.getElementById('checkinResult');
   btn.disabled = true; btn.textContent = '签到中...';
   result.classList.remove('hidden');
   result.innerHTML = '<div class="spinner" style="margin:0 auto"></div><p class="mt-1">正在签到...</p>';
 
-  const endpoint = qrType === 'checkout' ? '/api/check/out' : '/api/check/in';
-  try {
-    const res = await fetch(API + endpoint, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        token: token,
-        face_image_base64: '',
-        latitude: userLat,
-        longitude: userLng,
-        user_name: name,
-      }),
-    });
-    const data = await res.json();
-
-    if (res.ok) {
-      result.innerHTML = `<div class="badge badge-success" style="font-size:1.2rem">&#x2705; ${qrType === 'checkout' ? '签退成功' : '签到成功'}!</div>
-        <p class="mt-1" style="font-size:1.1rem;font-weight:700">${data.user_name}</p>
-        <p style="font-size:0.82rem;color:var(--ink-muted)">时间: ${new Date(data.check_in_time).toLocaleString()}</p>
-        <p style="font-size:0.82rem;color:var(--ink-muted)">地点: ${data.location_name || '—'}</p>`;
+  var endpoint = qrType === 'checkout' ? '/api/check/out' : '/api/check/in';
+  fetch(API + endpoint, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      token: token,
+      face_image_base64: '',
+      latitude: userLat,
+      longitude: userLng,
+      user_name: name,
+    }),
+  })
+  .then(function(resp) {
+    return resp.json().then(function(data) { return {ok: resp.ok, data: data}; });
+  })
+  .then(function(r) {
+    if (r.ok) {
+      result.innerHTML = '<div class="badge badge-success" style="font-size:1.2rem">&#x2705; ' + (qrType === 'checkout' ? '签退成功' : '签到成功') + '!</div><p class="mt-1" style="font-size:1.1rem;font-weight:700">' + r.data.user_name + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">时间: ' + new Date(r.data.check_in_time).toLocaleString() + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">地点: ' + (r.data.location_name || '-') + '</p>';
       if (qrType === 'checkin') {
         document.getElementById('statusCard').classList.remove('hidden');
         document.getElementById('statusTitle').textContent = '已签到';
-        document.getElementById('statusDetail').textContent = `${data.user_name} — ${data.location_name || ''}`;
-        document.getElementById('statusTime').textContent = `签到时间: ${new Date(data.check_in_time).toLocaleString()}`;
+        document.getElementById('statusDetail').textContent = r.data.user_name + ' - ' + (r.data.location_name || '');
+        document.getElementById('statusTime').textContent = '签到时间: ' + new Date(r.data.check_in_time).toLocaleString();
       }
       document.getElementById('mainCard').classList.add('hidden');
     } else {
-      result.innerHTML = `<div class="badge badge-danger">&#x274c; ${data.detail || '操作失败'}</div>`;
+      result.innerHTML = '<div class="badge badge-danger">&#x274c; ' + (r.data.detail || '操作失败') + '</div>';
       btn.disabled = false; btn.textContent = '&#x2705; 确认签到';
     }
-  } catch (e) {
-    result.innerHTML = `<div class="badge badge-danger">网络错误: ${e.message}</div>`;
+  })
+  .catch(function(e) {
+    result.innerHTML = '<div class="badge badge-danger">网络错误: ' + e.message + '</div>';
     btn.disabled = false; btn.textContent = '&#x2705; 确认签到';
-  }
+  });
 }
 
 function showToast(msg, type) {
-  const t = document.createElement('div');
-  t.className = `toast toast-${type}`; t.textContent = msg;
+  var t = document.createElement('div');
+  t.className = 'toast toast-' + type;
+  t.textContent = msg;
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 3000);
+  setTimeout(function() { t.remove(); }, 3000);
 }
 </script>
 </body>
