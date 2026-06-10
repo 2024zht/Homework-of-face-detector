@@ -323,13 +323,8 @@ async def validate_location(
     if location is None:
         raise HTTPException(status_code=404, detail="Location not found")
 
-    if getattr(req, 'source', None) == 'amap':
-        distance = haversine_distance(req.lat, req.lng, location.latitude, location.longitude)
-        within = distance <= location.radius_meters
-        addr = await reverse_geocode(req.lat, req.lng)
-    else:
-        within, distance = is_within_range(req.lat, req.lng, location.latitude, location.longitude, location.radius_meters)
-        addr = await reverse_geocode(req.lat, req.lng)
+    within, distance = is_within_range(req.lat, req.lng, location.latitude, location.longitude, location.radius_meters)
+    addr = await reverse_geocode(req.lat, req.lng)
 
     return {
         "within_range": within,

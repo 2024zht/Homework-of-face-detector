@@ -73,9 +73,7 @@ def is_within_range(
     Phone GPS (WGS-84) is converted to GCJ-02 to match Gaode coordinates.
     Returns (is_within, distance_meters).
     """
-    # Convert phone GPS WGS-84 → GCJ-02 to match lab coordinates from Gaode
-    user_gcj_lat, user_gcj_lng = wgs84_to_gcj02(user_lat, user_lng)
-    distance = haversine_distance(user_gcj_lat, user_gcj_lng, target_lat, target_lng)
+    distance = haversine_distance(user_lat, user_lng, target_lat, target_lng)
     return distance <= radius_meters, distance
 
 
