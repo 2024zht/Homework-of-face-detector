@@ -104,10 +104,17 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
     )
     db.add(checkin)
 
-    # 7. Mark QR as used
+    # 7. Self-learning: if face matched, blend new embedding into stored one
+    if embedding is not None and user_id is not None:
+        user = (await db.execute(select(User).where(User.id == user_id))).scalar_one()
+        if user.face_embedding is not None:
+            from services.face_service import update_embedding
+            user.face_embedding = update_embedding(user.face_embedding, embedding)
+
+    # 8. Mark QR as used
     await mark_qr_used(db, req.token)
 
-    # 8. Get user info for response
+    # 9. Get user info for response
     user_stmt = select(User).where(User.id == user_id)
     user_result = await db.execute(user_stmt)
     user = user_result.scalar_one()

@@ -120,3 +120,22 @@ def save_checkin_photo(image_data: bytes, filename: str) -> str:
     with open(path, 'wb') as f:
         f.write(image_data)
     return f"photos/{filename}"
+
+
+LEARNING_RATE = 0.15  # weight for new embedding in moving average
+
+
+def update_embedding(old_bytes: bytes, new_embedding: np.ndarray) -> bytes:
+    """
+    Self-learning: merge new embedding into stored one via moving average.
+    Blends old stored embedding (85%) with new one (15%), then re-normalizes.
+    Over time, the stored embedding becomes a richer representation of the person.
+    """
+    old_emb = bytes_to_embedding(old_bytes)
+    if old_emb.shape != new_embedding.shape:
+        return embedding_to_bytes(new_embedding)
+    blended = (1.0 - LEARNING_RATE) * old_emb + LEARNING_RATE * new_embedding
+    norm = np.linalg.norm(blended)
+    if norm > 0:
+        blended = blended / norm
+    return embedding_to_bytes(blended.astype(np.float32))
