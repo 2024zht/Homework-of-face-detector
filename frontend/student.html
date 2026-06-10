@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>我的签到</title>
 <link rel="stylesheet" href="/frontend/css/app.css">
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <style>
 .signin-options { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .signin-option { cursor: pointer; padding: 24px 16px; border-radius: var(--radius); border: 2px solid var(--border); text-align: center; transition: all .15s; background: var(--surface); }
@@ -14,6 +13,7 @@
 .signin-option .title { font-weight: 650; font-size: 1rem; }
 .signin-option .desc { font-size: .78rem; color: var(--ink-muted); }
 @media (max-width: 380px) { .signin-options { grid-template-columns: 1fr; } }
+.qr-img { width: 220px; height: 220px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
 </style>
 </head>
 <body>
@@ -34,12 +34,12 @@
     <p id="statusTime" style="font-size:.78rem;color:var(--ink-muted)"></p>
   </div>
 
-  <!-- Sign-in options -->
+  <!-- Options -->
   <div class="card" style="padding:16px 20px">
     <p style="font-size:.9rem;font-weight:600;margin-bottom:12px">选择签到方式</p>
     <div class="signin-options">
-      <div class="signin-option" onclick="openQRScanner()">
-        <span class="icon">&#x1f4f1;</span><div class="title">扫码签到</div><div class="desc">扫描屏幕上的二维码</div>
+      <div class="signin-option" onclick="showQRCode()">
+        <span class="icon">&#x1f4f1;</span><div class="title">扫码签到</div><div class="desc">手机扫描二维码签到</div>
       </div>
       <div class="signin-option" onclick="openCameraSignin()">
         <span class="icon">&#x1f4f7;</span><div class="title">摄像头签到</div><div class="desc">人脸识别自动签到</div>
@@ -54,12 +54,12 @@
   </div>
 </div>
 
-<!-- Modal overlay -->
+<!-- Modal -->
 <div class="modal-overlay hidden" id="modalOverlay" onclick="if(event.target===this)closeModal()">
   <div class="modal" id="modalContent" style="max-width:420px;text-align:center">
     <h3 id="modalTitle"></h3>
     <div id="modalBody"></div>
-    <button class="btn btn-secondary mt-2" onclick="closeModal()" id="modalClose">关闭</button>
+    <button class="btn btn-secondary mt-2" onclick="closeModal()">关闭</button>
   </div>
 </div>
 
@@ -70,9 +70,10 @@ var USER = JSON.parse(localStorage.getItem('user') || '{}');
 if (!TOKEN) window.location.href = '/login.html';
 document.getElementById('userName').textContent = USER.name || USER.username;
 var _stream = null;
+var _refreshTimer = null;
 
 function closeModal() {
-  if (_stream) { _stream.getTracks().forEach(function(t) { t.stop(); }); _stream = null; }
+  if (_stream) { _stream.getTracks().forEach(function(t){t.stop()}); _stream = null; }
   document.getElementById('modalOverlay').classList.add('hidden');
 }
 
@@ -84,8 +85,9 @@ async function api(url, opts) {
   return r;
 }
 
-// ── Load status & history ────────────────────────────────
-(async function() {
+// ── Load all data (status + history) ───────────────────
+async function loadAll() {
+  // Status
   var r = await api('/api/check/status?user_id=' + USER.id);
   var d = await r.json();
   if (d.is_checked_in) {
@@ -102,6 +104,7 @@ async function api(url, opts) {
     document.getElementById('statusTime').textContent = '';
   }
 
+  // History
   var r2 = await api('/api/admin/checkins?user_id=' + USER.id);
   var records = await r2.json();
   var html = '';
@@ -117,66 +120,42 @@ async function api(url, opts) {
     html += '</tbody></table>';
   }
   document.getElementById('historyTable').innerHTML = html;
-})();
-
-// ── QR Scanner ────────────────────────────────────────────
-function openQRScanner() {
-  document.getElementById('modalTitle').textContent = '扫描二维码';
-  document.getElementById('modalBody').innerHTML = '<canvas id="qrCanvas" style="width:100%;max-width:320px;border-radius:8px"></canvas><video id="qrVideo" autoplay playsinline style="display:none"></video><p style="margin-top:8px;font-size:.85rem;color:var(--ink-secondary)">将二维码对准屏幕中央</p><p id="qrStatus" style="font-size:.78rem;color:var(--ink-muted)"></p>';
-  document.getElementById('modalOverlay').classList.remove('hidden');
-
-  var video = document.getElementById('qrVideo');
-  var canvas = document.getElementById('qrCanvas');
-  var ctx = canvas.getContext('2d');
-  var scanning = true;
-
-  navigator.mediaDevices.getUserMedia({video: {facingMode: 'environment', width: {ideal: 640}, height: {ideal: 480}}}).then(function(stream) {
-    _stream = stream;
-    video.srcObject = stream;
-    video.play();
-
-    var tick = function() {
-      if (!scanning) return;
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-        if (typeof jsQR !== 'undefined') {
-          var code = jsQR(imageData.data, canvas.width, canvas.height);
-          if (code && code.data) {
-            scanning = false;
-            document.getElementById('qrStatus').textContent = '检测到签到码!';
-            closeModal();
-            if (code.data.includes('checkin.html?token=')) {
-              window.location.href = code.data;
-            } else {
-              window.open(code.data, '_blank');
-            }
-            return;
-          }
-        }
-      }
-      requestAnimationFrame(tick);
-    };
-    tick();
-  }).catch(function(e) {
-    document.getElementById('qrStatus').textContent = '摄像头不可用: ' + e.message;
-  });
 }
 
-// ── Camera Face Sign-in ──────────────────────────────────
+loadAll();
+// Auto-refresh every 5 seconds
+_refreshTimer = setInterval(loadAll, 5000);
+
+// ── Show QR Code ───────────────────────────────────────
+async function showQRCode() {
+  document.getElementById('modalTitle').textContent = '扫码签到';
+  document.getElementById('modalBody').innerHTML = '<div class="spinner" style="margin:20px auto"></div><p>生成二维码...</p>';
+  document.getElementById('modalOverlay').classList.remove('hidden');
+
+  try {
+    var r = await api('/api/qr/self', {method: 'POST'});
+    var d = await r.json();
+    document.getElementById('modalBody').innerHTML =
+      '<img src="' + d.qr_url + '" class="qr-img" alt="QR">' +
+      '<p style="font-size:.82rem;color:var(--ink-muted);margin-top:8px;word-break:break-all">' + d.checkin_url + '</p>' +
+      '<p style="font-size:.75rem;color:var(--ink-muted)">有效期至: ' + new Date(d.expires_at).toLocaleString() + '</p>' +
+      '<p style="font-size:.8rem;margin-top:8px">用手机扫描上方二维码完成签到</p>';
+  } catch(e) {
+    document.getElementById('modalBody').innerHTML = '<p class="badge badge-danger">生成失败，请重试</p>';
+  }
+}
+
+// ── Camera Face Sign-in ────────────────────────────────
 function openCameraSignin() {
   document.getElementById('modalTitle').textContent = '人脸识别签到';
-  document.getElementById('modalBody').innerHTML = '<div id="cameraSignin"><p style="font-size:.85rem;margin-bottom:8px">请将面部对准摄像头</p><video id="camVideo" autoplay playsinline style="width:100%;border-radius:8px;max-height:300px"></video><canvas id="camCanvas" class="hidden"></canvas><button class="btn btn-primary btn-block mt-2" onclick="takeFacePhoto()" id="camBtn">&#x1f4f8; 拍照识别</button><div id="camResult" class="mt-2"></div></div>';
+  document.getElementById('modalBody').innerHTML = '<video id="camVideo" autoplay playsinline style="width:100%;border-radius:8px;max-height:300px"></video><canvas id="camCanvas" class="hidden"></canvas><button class="btn btn-primary btn-block mt-2" onclick="takeFacePhoto()" id="camBtn">&#x1f4f8; 拍照识别</button><div id="camResult" class="mt-2"></div>';
   document.getElementById('modalOverlay').classList.remove('hidden');
 
   navigator.mediaDevices.getUserMedia({video: {facingMode: 'user'}}).then(function(stream) {
     _stream = stream;
     document.getElementById('camVideo').srcObject = stream;
   }).catch(function(e) {
-    document.getElementById('cameraSignin').innerHTML = '<div class="badge badge-danger">无法访问摄像头: ' + e.message + '</div>';
+    document.getElementById('modalBody').innerHTML = '<div class="badge badge-danger">无法访问摄像头</div>';
   });
 }
 
@@ -189,41 +168,28 @@ function takeFacePhoto() {
   canvas.height = video.videoHeight || 480;
   canvas.getContext('2d').drawImage(video, 0, 0);
   var b64 = canvas.toDataURL('image/jpeg', 0.85);
-
   btn.disabled = true; btn.textContent = '识别中...';
   result.innerHTML = '<div class="spinner" style="margin:8px auto"></div>';
 
-  // First: get user's location
-  var lat = null, lng = null;
-  var getLocation = function() {
-    return new Promise(function(resolve) {
-      if (!navigator.geolocation) { resolve(); return; }
-      navigator.geolocation.getCurrentPosition(function(p) { lat = p.coords.latitude; lng = p.coords.longitude; resolve(); }, function() { resolve(); }, {timeout: 5000});
-    });
-  };
-
-  getLocation().then(function() {
-    return fetch(API + '/api/check/in', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({token: 'camera-direct', face_image_base64: b64, latitude: lat, longitude: lng, user_name: USER.name}),
-    });
+  fetch(API + '/api/check/in', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({token: 'camera-direct', face_image_base64: b64, latitude: null, longitude: null, user_name: USER.name}),
   }).then(function(r) { return r.json(); }).then(function(d) {
     if (d.id) {
-      result.innerHTML = '<div class="badge badge-success" style="font-size:1rem">&#x2705; 签到成功! ' + d.user_name + '</div><p style="font-size:.8rem;color:var(--ink-muted)">时间: ' + new Date(d.check_in_time).toLocaleString() + '</p>';
-      document.getElementById('statusIcon').innerHTML = '&#x2705;';
-      document.getElementById('statusTitle').textContent = '已签到';
+      result.innerHTML = '<div class="badge badge-success">&#x2705; 签到成功! ' + d.user_name + '</div>';
+      loadAll();
     } else {
-      result.innerHTML = '<div class="badge badge-danger">&#x274c; ' + (d.detail || '识别失败') + '</div>';
+      result.innerHTML = '<div class="badge badge-danger">&#x274c; ' + (d.detail || '失败') + '</div>';
+      btn.disabled = false; btn.textContent = '重试';
     }
-    btn.disabled = false; btn.textContent = '重试';
   }).catch(function(e) {
-    result.innerHTML = '<div class="badge badge-danger">错误: ' + e.message + '</div>';
+    result.innerHTML = '<div class="badge badge-danger">' + e.message + '</div>';
     btn.disabled = false; btn.textContent = '重试';
   });
 }
 
-function logout() { localStorage.clear(); window.location.href = '/login.html'; }
+function logout() { localStorage.clear(); if(_refreshTimer) clearInterval(_refreshTimer); window.location.href = '/login.html'; }
 </script>
 </body>
 </html>

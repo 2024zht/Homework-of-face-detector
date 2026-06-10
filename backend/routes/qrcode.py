@@ -83,13 +83,40 @@ async def validate_qr(token: str, db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.post("/self")
+async def self_qr(request: Request, db: AsyncSession = Depends(get_db)):
+    """Any authenticated user can get a personal check-in QR code."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(auth[7:])
+    if payload is None:
+        raise HTTPException(status_code=401)
+    loc_stmt = select(Location).where(Location.is_active == True).limit(1)
+    loc_result = await db.execute(loc_stmt)
+    location = loc_result.scalar_one_or_none()
+    if location is None:
+        raise HTTPException(status_code=404, detail="No active location")
+    from config import BASE_URL
+    base_url = BASE_URL.rstrip("/")
+    session, filename = await generate_qr_session(
+        db=db, qr_type="checkin", location_id=location.id,
+        generated_by=int(payload["sub"]), base_url=base_url,
+    )
+    return {
+        "token": session.token,
+        "qr_url": f"{base_url}/static/qrcodes/{filename}",
+        "checkin_url": f"{base_url}/checkin.html?token={session.token}&type=checkin&location_id={location.id}",
+        "expires_at": session.expires_at.isoformat(),
+    }
+
+
 @router.get("/image/{filename}")
 async def get_qr_image(filename: str):
     """Serve QR code image."""
     from fastapi.responses import FileResponse
     import os
     from config import QRCODE_DIR
-
     path = os.path.join(QRCODE_DIR, filename)
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="QR image not found")
