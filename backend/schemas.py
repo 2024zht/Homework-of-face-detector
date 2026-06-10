@@ -63,6 +63,7 @@ class CheckInRequest(BaseModel):
     latitude: Optional[float] = None  # from Gaode JS API
     longitude: Optional[float] = None
     user_name: Optional[str] = None  # manual name input as fallback
+    source: Optional[str] = None  # "amap"=GCJ-02, absent=WGS-84
 
 
 class CheckOutRequest(BaseModel):
@@ -134,3 +135,4 @@ class LocationValidateRequest(BaseModel):
     lat: float
     lng: float
     location_id: int
+    source: Optional[str] = None  # "amap"=GCJ-02
