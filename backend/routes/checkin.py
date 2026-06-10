@@ -62,6 +62,7 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
 
     # 3. Identify user: face recognition OR name match
     user_id = None
+    embedding = None
 
     # Try face recognition if image provided
     if req.face_image_base64 and req.face_image_base64.strip():
