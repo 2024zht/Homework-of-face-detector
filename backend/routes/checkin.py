@@ -108,7 +108,7 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
     # 6. Record check-in
     checkin = CheckIn(
         user_id=user_id,
-        location_id=qr.location_id,
+        location_id=location.id,
         lat=req.latitude,
         lng=req.longitude,
         location_name=location_name,
