@@ -26,6 +26,20 @@
       <span class="badge badge-warning hidden" id="locationBadge">定位中...</span>
     </div>
 
+    <!-- GPS tip -->
+    <div id="gpsTip" class="card hidden" style="background:var(--brand-subtle);border:1px solid var(--brand);margin-bottom:12px">
+      <p style="font-weight:650;color:var(--brand);font-size:.9rem">&#x1f4cd; 如何获得高精度定位？</p>
+      <p style="font-size:.8rem;color:var(--ink-secondary);margin-top:4px">
+        <b>iPhone:</b> 设置 → 隐私 → 定位服务 → Safari → 选"使用App期间"<br>
+        <b>Android:</b> 下拉通知栏 → 长按"位置" → 选"高精度"<br>
+        <b>建议:</b> 靠近窗户或室外，等待30秒让GPS锁定
+      </p>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="dismissGpsTip()" style="font-size:.8rem;padding:6px 14px">知道了</button>
+        <button class="btn btn-secondary" onclick="dismissGpsTipForever()" style="font-size:.78rem;padding:6px 12px">不再提示</button>
+      </div>
+    </div>
+
     <div id="stepLocation">
       <p style="font-size:0.9rem;margin-bottom:12px">需要获取你的位置以确认在签到范围内</p>
       <button class="btn btn-primary btn-block" onclick="getLocation()" id="locBtn">&#x1f4cd; 获取位置</button>
@@ -49,6 +63,13 @@
 var API = window.location.origin;
 var token = null, qrType = null, locationId = null;
 var userLat = null, userLng = null, locationVerified = false;
+
+// Show GPS tip if not dismissed before
+if (!localStorage.getItem('gpsTipDismissed')) {
+  document.getElementById('gpsTip').classList.remove('hidden');
+}
+function dismissGpsTip() { document.getElementById('gpsTip').classList.add('hidden'); }
+function dismissGpsTipForever() { localStorage.setItem('gpsTipDismissed', '1'); document.getElementById('gpsTip').classList.add('hidden'); }
 
 (function() {
   var p = new URLSearchParams(window.location.search);
