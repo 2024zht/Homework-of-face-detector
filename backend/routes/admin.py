@@ -259,14 +259,28 @@ async def get_statistics(
     )
 
 
+async def _get_current_user(request: Request):
+    """Auth that accepts any valid logged-in user."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    payload = decode_access_token(auth[7:])
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return payload
+
+
 @router.get("/checkins", response_model=list[CheckInRecord])
 async def list_checkins(
     date: Optional[str] = None,
     user_id: Optional[int] = None,
     status: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    _admin=Depends(get_current_admin),
+    _user=Depends(_get_current_user),
 ):
+    # Students can only see their own records
+    if _user.get("role") == "student":
+        user_id = int(_user["sub"])
     stmt = select(CheckIn).options(selectinload(CheckIn.user))
     if date:
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
