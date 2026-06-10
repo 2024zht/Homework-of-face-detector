@@ -36,16 +36,29 @@ async def _verify_location(lat: float, lng: float, location_id: int, db: AsyncSe
 
 @router.post("/in", response_model=CheckInResponse)
 async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
-    # 1. Validate QR token
-    qr = await validate_qr_token(db, req.token)
-    if qr is None:
-        raise HTTPException(status_code=400, detail="QR code expired or invalid")
-    if qr.type != "checkin":
-        raise HTTPException(status_code=400, detail="This QR code is for check-out, not check-in")
-
-    # 2. Verify location
-    location, distance = await _verify_location(req.latitude, req.longitude, qr.location_id, db)
-    location_name = await reverse_geocode(req.latitude, req.longitude)
+    # 1. Validate QR token (or allow camera-direct)
+    if req.token == "camera-direct":
+        loc_stmt = select(Location).where(Location.is_active == True).limit(1)
+        loc_result = await db.execute(loc_stmt)
+        location = loc_result.scalar_one_or_none()
+        if location is None:
+            raise HTTPException(status_code=400, detail="No active check-in location")
+        if req.latitude and req.longitude:
+            within, distance = is_within_range(req.latitude, req.longitude, location.latitude, location.longitude, location.radius_meters)
+            if not within:
+                raise HTTPException(status_code=400, detail=f"Out of range: {distance:.0f}m from {location.name}")
+        else:
+            distance = 0
+        location_name = await reverse_geocode(req.latitude, req.longitude) if req.latitude else location.name
+    else:
+        qr = await validate_qr_token(db, req.token)
+        if qr is None:
+            raise HTTPException(status_code=400, detail="QR code expired or invalid")
+        if qr.type != "checkin":
+            raise HTTPException(status_code=400, detail="This QR code is for check-out, not check-in")
+        location, distance = await _verify_location(req.latitude, req.longitude, qr.location_id, db)
+        location_name = await reverse_geocode(req.latitude, req.longitude)
+        await mark_qr_used(db, req.token)
 
     # 3. Identify user: face recognition OR name match
     user_id = None
@@ -111,8 +124,9 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
             from services.face_service import update_embedding
             user.face_embedding = update_embedding(user.face_embedding, embedding)
 
-    # 8. Mark QR as used
-    await mark_qr_used(db, req.token)
+    # 8. Mark QR as used (skip for camera-direct)
+    if req.token != "camera-direct":
+        await mark_qr_used(db, req.token)
 
     # 9. Get user info for response
     user_stmt = select(User).where(User.id == user_id)
