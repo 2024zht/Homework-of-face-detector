@@ -26,17 +26,19 @@
       <span class="badge badge-warning hidden" id="locationBadge">定位中...</span>
     </div>
 
-    <!-- GPS tip -->
-    <div id="gpsTip" class="card hidden" style="background:var(--brand-subtle);border:1px solid var(--brand);margin-bottom:12px">
-      <p style="font-weight:650;color:var(--brand);font-size:.9rem">&#x1f4cd; 如何获得高精度定位？</p>
-      <p style="font-size:.8rem;color:var(--ink-secondary);margin-top:4px">
-        <b>iPhone:</b> 设置 → 隐私 → 定位服务 → Safari → 选"使用App期间"<br>
-        <b>Android:</b> 下拉通知栏 → 长按"位置" → 选"高精度"<br>
-        <b>建议:</b> 靠近窗户或室外，等待30秒让GPS锁定
-      </p>
-      <div style="margin-top:8px;display:flex;gap:8px">
-        <button class="btn btn-primary" onclick="dismissGpsTip()" style="font-size:.8rem;padding:6px 14px">知道了</button>
-        <button class="btn btn-secondary" onclick="dismissGpsTipForever()" style="font-size:.78rem;padding:6px 12px">不再提示</button>
+    <!-- GPS tip modal -->
+    <div id="gpsTipOverlay" class="hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;z-index:2000">
+      <div style="background:rgba(255,255,255,.88);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-radius:20px;padding:32px 24px;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.2);max-width:340px;width:90%">
+        <p style="font-weight:700;color:var(--brand);font-size:1rem">&#x1f4cd; 如何获得高精度定位？</p>
+        <p style="font-size:.82rem;color:var(--ink-secondary);margin-top:12px;line-height:1.7;text-align:left">
+          <b>iPhone:</b> 设置 → 隐私 → 定位服务 → Safari → "使用App期间"<br>
+          <b>Android:</b> 下拉 → 长按"位置" → 高精度模式<br>
+          <b>建议:</b> 靠近窗户或室外，等待GPS锁定
+        </p>
+        <div style="margin-top:16px;display:flex;gap:8px;justify-content:center">
+          <button class="btn btn-primary" onclick="dismissGpsTip()" style="font-size:.82rem;padding:8px 20px">知道了</button>
+          <button class="btn btn-secondary" onclick="dismissGpsTipForever()" style="font-size:.78rem;padding:8px 16px">不再提示</button>
+        </div>
       </div>
     </div>
 
@@ -66,10 +68,10 @@ var userLat = null, userLng = null, locationVerified = false;
 
 // Show GPS tip if not dismissed before
 if (!localStorage.getItem('gpsTipDismissed')) {
-  document.getElementById('gpsTip').classList.remove('hidden');
+  document.getElementById('gpsTipOverlay').classList.remove('hidden');
 }
-function dismissGpsTip() { document.getElementById('gpsTip').classList.add('hidden'); }
-function dismissGpsTipForever() { localStorage.setItem('gpsTipDismissed', '1'); document.getElementById('gpsTip').classList.add('hidden'); }
+function dismissGpsTip() { document.getElementById('gpsTipOverlay').classList.add('hidden'); }
+function dismissGpsTipForever() { localStorage.setItem('gpsTipDismissed', '1'); document.getElementById('gpsTipOverlay').classList.add('hidden'); }
 
 (function() {
   var p = new URLSearchParams(window.location.search);

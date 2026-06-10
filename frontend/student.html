@@ -220,11 +220,12 @@ loadAll = async function() {
   await _origLoadAll();
   var nowIn = document.getElementById('statusTitle').textContent === '已签到';
   if (wasIn === false && nowIn === true) {
+    // Close any open modal
+    closeModal();
     showGlassToast('&#x2705;', '签到成功', USER.name, document.getElementById('statusDetail').textContent.replace('地点: ', ''));
   }
   _wasCheckedIn = nowIn;
 };
-// Init _wasCheckedIn after first load
 setTimeout(function() { _wasCheckedIn = document.getElementById('statusTitle').textContent === '已签到'; }, 2000);
 
 async function doSignOut() {
