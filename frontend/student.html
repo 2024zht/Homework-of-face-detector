@@ -236,14 +236,13 @@ async function doSignOut() {
     var r = await api('/api/check/self-out', {method: 'POST'});
     var d = await r.json();
     if (d.status === 'completed') {
-      loadAll();
+      await loadAll();
     } else {
       alert(d.detail || '签退失败');
-      btn.disabled = false; btn.textContent = '签退';
+      btn.disabled = false; btn.textContent = '&#x1f6aa; 签退';
     }
   } catch(e) {
-    alert('网络错误');
-    btn.disabled = false; btn.textContent = '签退';
+    btn.disabled = false; btn.textContent = '&#x1f6aa; 签退';
   }
 }
 
