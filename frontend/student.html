@@ -14,6 +14,9 @@
 .signin-option .desc { font-size: .78rem; color: var(--ink-muted); }
 @media (max-width: 380px) { .signin-options { grid-template-columns: 1fr; } }
 .qr-img { width: 220px; height: 220px; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+.glass-toast { position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; z-index: 2000; animation: fadeIn .3s ease; }
+.glass-toast-bg { background: rgba(255,255,255,.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-radius: 20px; padding: 40px 32px; text-align: center; box-shadow: 0 8px 40px rgba(0,0,0,.15); max-width: 320px; width: 85%; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 </style>
 </head>
 <body>
@@ -181,7 +184,8 @@ function takeFacePhoto() {
     body: JSON.stringify({token: 'camera-direct', face_image_base64: b64, latitude: null, longitude: null, user_name: USER.name}),
   }).then(function(r) { return r.json(); }).then(function(d) {
     if (d.id) {
-      result.innerHTML = '<div class="badge badge-success">&#x2705; 签到成功! ' + d.user_name + '</div>';
+      closeModal();
+      showGlassToast('&#x2705;', '签到成功', d.user_name, (d.location_name || ''));
       loadAll();
     } else {
       result.innerHTML = '<div class="badge badge-danger">&#x274c; ' + (d.detail || '失败') + '</div>';
@@ -192,6 +196,36 @@ function takeFacePhoto() {
     btn.disabled = false; btn.textContent = '重试';
   });
 }
+
+function showGlassToast(icon, title, name, location) {
+  var div = document.createElement('div');
+  div.className = 'glass-toast';
+  div.innerHTML = '<div class="glass-toast-bg">' +
+    '<div style="font-size:3rem">' + icon + '</div>' +
+    '<h2 style="margin-top:8px">' + title + '</h2>' +
+    '<p style="font-size:1.1rem;font-weight:700;margin-top:4px">' + name + '</p>' +
+    '<p style="font-size:.85rem;color:var(--ink-secondary);margin-top:4px">地点: ' + location + '</p>' +
+    '<p style="font-size:.8rem;color:var(--ink-muted);margin-top:4px">' + new Date().toLocaleTimeString() + '</p>' +
+  '</div>';
+  document.body.appendChild(div);
+  setTimeout(function() { div.remove(); }, 3000);
+  div.addEventListener('click', function() { div.remove(); });
+}
+
+// Also show toast when QR scan check-in is detected
+var _wasCheckedIn = null;
+var _origLoadAll = loadAll;
+loadAll = async function() {
+  var wasIn = _wasCheckedIn;
+  await _origLoadAll();
+  var nowIn = document.getElementById('statusTitle').textContent === '已签到';
+  if (wasIn === false && nowIn === true) {
+    showGlassToast('&#x2705;', '签到成功', USER.name, document.getElementById('statusDetail').textContent.replace('地点: ', ''));
+  }
+  _wasCheckedIn = nowIn;
+};
+// Init _wasCheckedIn after first load
+setTimeout(function() { _wasCheckedIn = document.getElementById('statusTitle').textContent === '已签到'; }, 2000);
 
 async function doSignOut() {
   if (!confirm('确认签退？')) return;

@@ -112,7 +112,7 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
         location_id=location.id,
         lat=req.latitude,
         lng=req.longitude,
-        location_name=location_name,
+        location_name=location_name or location.name,
         check_in_photo=photo_path,
         status="active",
     )
