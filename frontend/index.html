@@ -9,51 +9,51 @@
 <body>
 <div class="container" id="app">
   <div style="text-align:center;padding:20px 0 12px">
-    <h1 style="color:var(--brand)">&#x1f3e2; 实验室签到</h1>
-    <p style="margin-top:4px">精准定位 · 快速签到</p>
+    <h1 style="color:var(--brand)">Laboratory</h1>
+    <p style="margin-top:4px">Precise Location - Quick Check-in</p>
   </div>
 
   <div class="card result-card result-success hidden" id="statusCard">
     <div class="result-icon">&#x2705;</div>
-    <h2 id="statusTitle">已签到</h2>
+    <h2 id="statusTitle">Checked In</h2>
     <p id="statusDetail"></p>
     <p class="mt-1" style="font-size:0.82rem;color:var(--ink-muted)" id="statusTime"></p>
   </div>
 
+  <!-- GPS Tip Modal -->
+  <div id="gpsTipOverlay" class="hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;z-index:2000">
+    <div style="background:rgba(255,255,255,.88);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-radius:20px;padding:32px 24px;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.2);max-width:340px;width:90%">
+      <p style="font-weight:700;color:var(--brand);font-size:1rem">How to Enable High-Accuracy GPS</p>
+      <p style="font-size:.82rem;color:var(--ink-secondary);margin-top:12px;line-height:1.7;text-align:left">
+        <b>iPhone:</b> Settings - Privacy - Location Services - Safari - "While Using"<br>
+        <b>Android:</b> Swipe down - Long press "Location" - High Accuracy<br>
+        <b>Tip:</b> Stay near window or outdoors for best signal
+      </p>
+      <div style="margin-top:16px;display:flex;gap:8px;justify-content:center">
+        <button class="btn btn-primary" onclick="dismissGpsTip()" style="font-size:.82rem;padding:8px 20px">Got it</button>
+        <button class="btn btn-secondary" onclick="dismissGpsTipForever()" style="font-size:.78rem;padding:8px 16px">Don't show again</button>
+      </div>
+    </div>
+  </div>
+
   <div class="card" id="mainCard">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-      <h3 id="stepTitle">第1步：验证位置</h3>
-      <span class="badge badge-warning hidden" id="locationBadge">定位中...</span>
-    </div>
-
-    <!-- GPS tip modal -->
-    <div id="gpsTipOverlay" class="hidden" style="position:fixed;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;z-index:2000">
-      <div style="background:rgba(255,255,255,.88);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-radius:20px;padding:32px 24px;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.2);max-width:340px;width:90%">
-        <p style="font-weight:700;color:var(--brand);font-size:1rem">&#x1f4cd; 如何获得高精度定位？</p>
-        <p style="font-size:.82rem;color:var(--ink-secondary);margin-top:12px;line-height:1.7;text-align:left">
-          <b>iPhone:</b> 设置 → 隐私 → 定位服务 → Safari → "使用App期间"<br>
-          <b>Android:</b> 下拉 → 长按"位置" → 高精度模式<br>
-          <b>建议:</b> 靠近窗户或室外，等待GPS锁定
-        </p>
-        <div style="margin-top:16px;display:flex;gap:8px;justify-content:center">
-          <button class="btn btn-primary" onclick="dismissGpsTip()" style="font-size:.82rem;padding:8px 20px">知道了</button>
-          <button class="btn btn-secondary" onclick="dismissGpsTipForever()" style="font-size:.78rem;padding:8px 16px">不再提示</button>
-        </div>
-      </div>
+      <h3 id="stepTitle">Step 1: Verify Location</h3>
+      <span class="badge badge-warning hidden" id="locationBadge">Locating...</span>
     </div>
 
     <div id="stepLocation">
-      <p style="font-size:0.9rem;margin-bottom:12px">需要获取你的位置以确认在签到范围内</p>
-      <button class="btn btn-primary btn-block" onclick="getLocation()" id="locBtn">&#x1f4cd; 获取位置</button>
+      <p style="font-size:0.9rem;margin-bottom:12px">Your location is needed to confirm you are within range</p>
+      <button class="btn btn-primary btn-block" onclick="getLocation()" id="locBtn">Get Location</button>
       <div id="locResult" class="mt-2 hidden"></div>
     </div>
 
     <div id="stepName" class="hidden">
-      <p style="font-size:0.9rem;margin-bottom:12px">确认身份信息，点击签到</p>
+      <p style="font-size:0.9rem;margin-bottom:12px">Confirm your identity to check in</p>
       <div class="input-group">
-        <input type="text" class="input" id="userName" placeholder="输入姓名（如：郭晓飞）" required>
+        <input type="text" class="input" id="userName" placeholder="Enter your name" required>
       </div>
-      <button class="btn btn-primary btn-block btn-lg mt-3" onclick="submitByName()" id="checkinBtn">&#x2705; 确认签到</button>
+      <button class="btn btn-primary btn-block btn-lg mt-3" onclick="submitByName()" id="checkinBtn">Confirm Check-in</button>
       <div id="checkinResult" class="text-center mt-3 hidden"></div>
     </div>
   </div>
@@ -65,236 +65,184 @@
 var API = window.location.origin;
 var token = null, qrType = null, locationId = null;
 var userLat = null, userLng = null, locationVerified = false;
+var coordSource = 'amap'; // Gaode returns GCJ-02, no conversion needed
 
-// Show GPS tip if not dismissed before
-if (!localStorage.getItem('gpsTipDismissed')) {
-  document.getElementById('gpsTipOverlay').classList.remove('hidden');
-}
-function dismissGpsTip() { document.getElementById('gpsTipOverlay').classList.add('hidden'); }
-function dismissGpsTipForever() { localStorage.setItem('gpsTipDismissed', '1'); document.getElementById('gpsTipOverlay').classList.add('hidden'); }
-
+// ── Init ──────────────────────────────────────────────────
 (function() {
   var p = new URLSearchParams(window.location.search);
-  token = p.get('token');
-  qrType = p.get('type') || 'checkin';
-  locationId = p.get('location_id');
+  token = p.get('token'); qrType = p.get('type') || 'checkin'; locationId = p.get('location_id');
   if (token) {
     document.getElementById('tokenInfo').textContent = 'Session: ' + token.slice(0,8) + '... | ' + qrType;
-    fetch(API + '/api/qr/validate/' + token)
-      .then(function(r) { return r.json(); })
-      .then(function(d) {
-        if (!d.valid) showToast('二维码已过期或无效', 'error');
-        else document.getElementById('stepTitle').textContent = (d.location_name || '签到点') + ' - ' + (qrType === 'checkin' ? '签到' : '签退');
-      });
+    fetch(API + '/api/qr/validate/' + token).then(function(r){return r.json()}).then(function(d){
+      if (!d.valid) showToast('QR code expired or invalid', 'error');
+      else document.getElementById('stepTitle').textContent = (d.location_name || 'Check-in Point') + ' - ' + (qrType === 'checkin' ? 'Sign In' : 'Sign Out');
+    });
   }
 })();
 
 (function() {
   var u = JSON.parse(localStorage.getItem('user') || '{}');
   if (u.id) {
-    fetch(API + '/api/check/status?user_id=' + u.id)
-      .then(function(r) { return r.json(); })
-      .then(function(d) {
-        if (d.is_checked_in) {
-          document.getElementById('statusCard').classList.remove('hidden');
-          document.getElementById('statusTitle').textContent = '已签到';
-          document.getElementById('statusDetail').textContent = '地点: ' + (d.location_name || '-');
-          var t = '签到时间: ' + new Date(d.check_in_time).toLocaleString();
-          if (d.auto_checkout_at) t += ' | 自动签退: ' + new Date(d.auto_checkout_at).toLocaleTimeString();
-          document.getElementById('statusTime').textContent = t;
-        }
-      });
+    fetch(API + '/api/check/status?user_id=' + u.id).then(function(r){return r.json()}).then(function(d){
+      if (d.is_checked_in) {
+        document.getElementById('statusCard').classList.remove('hidden');
+        document.getElementById('statusTitle').textContent = 'Checked In';
+        document.getElementById('statusDetail').textContent = 'Location: ' + (d.location_name || '-');
+        var t = 'Check-in: ' + new Date(d.check_in_time).toLocaleString();
+        if (d.auto_checkout_at) t += ' | Auto checkout: ' + new Date(d.auto_checkout_at).toLocaleTimeString();
+        document.getElementById('statusTime').textContent = t;
+      }
+    });
   }
 })();
 
-var _watchId = null;
+// ── GPS Tip ──────────────────────────────────────────────
+if (!localStorage.getItem('gpsTipDismissed')) document.getElementById('gpsTipOverlay').classList.remove('hidden');
+function dismissGpsTip() { document.getElementById('gpsTipOverlay').classList.add('hidden'); }
+function dismissGpsTipForever() { localStorage.setItem('gpsTipDismissed', '1'); document.getElementById('gpsTipOverlay').classList.add('hidden'); }
 
+// ── Pre-load Gaode JS ────────────────────────────────────
+var _amapReady = false;
+(function() {
+  var s = document.createElement('script');
+  s.src = 'https://webapi.amap.com/maps?v=2.0&key=c8e18f605b4553734875dbc4d172be96&plugin=AMap.Geolocation';
+  s.onload = function() { _amapReady = true; };
+  s.onerror = function() { _amapReady = false; };
+  document.head.appendChild(s);
+})();
+
+// ── Location ─────────────────────────────────────────────
 function getLocation() {
   var btn = document.getElementById('locBtn');
   var badge = document.getElementById('locationBadge');
   var result = document.getElementById('locResult');
-
-  // Stop any existing watch
-  if (_watchId !== null) { navigator.geolocation.clearWatch(_watchId); _watchId = null; }
-
-  btn.disabled = true; btn.textContent = '定位中...';
+  btn.disabled = true; btn.textContent = 'Locating...';
   badge.classList.remove('hidden');
-  badge.className = 'badge badge-warning'; badge.textContent = '正在搜索卫星信号...';
+  badge.className = 'badge badge-warning'; badge.textContent = 'Locating...';
   result.classList.add('hidden');
 
-  if (!navigator.geolocation) {
-    result.classList.remove('hidden');
-    result.innerHTML = '<div class="badge badge-danger">&#x274c; 浏览器不支持定位</div>';
-    badge.className = 'badge badge-danger'; badge.textContent = '不支持';
-    btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
-    return;
+  if (_amapReady && window.AMap) {
+    window.AMap.plugin('AMap.Geolocation', function() {
+      var geo = new window.AMap.Geolocation({enableHighAccuracy: true, timeout: 15000});
+      geo.getCurrentPosition(function(status, amapResult) {
+        if (status === 'complete' && amapResult.position) {
+          userLat = amapResult.position.lat;
+          userLng = amapResult.position.lng;
+          coordSource = 'amap';
+          badge.className = 'badge badge-success';
+          badge.textContent = 'AMap (' + (amapResult.accuracy || 30).toFixed(0) + 'm)';
+          validateAndProceed(btn, badge, result);
+        } else {
+          fallbackGPS(btn, badge, result);
+        }
+      });
+    });
+  } else {
+    fallbackGPS(btn, badge, result);
   }
-
-  var startTime = Date.now();
-  var bestPos = null;
-  var count = 0;
-
-  // Update status every 5 seconds
-  var statusTimer = setInterval(function() {
-    var elapsed = Math.floor((Date.now() - startTime) / 1000);
-    badge.textContent = '搜索卫星中... (' + elapsed + '秒)';
-  }, 5000);
-
-  // Use watchPosition: keeps GPS active until we get a good fix
-  _watchId = navigator.geolocation.watchPosition(
-    function(pos) {
-      count++;
-      var acc = pos.coords.accuracy || 999;
-      // Keep the best accuracy reading
-      if (!bestPos || acc < bestPos.accuracy) {
-        bestPos = {lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: acc};
-      }
-
-      // Update badge with progress
-      var elapsed = Math.floor((Date.now() - startTime) / 1000);
-      badge.textContent = 'GPS信号: ' + acc.toFixed(0) + 'm精度 (' + elapsed + '秒)';
-
-      // Good enough — stop and use this position
-      if (acc <= 80) {
-        navigator.geolocation.clearWatch(_watchId);
-        _watchId = null;
-        clearInterval(statusTimer);
-        usePosition(bestPos, badge, result, btn);
-      }
-    },
-    function(err) {
-      navigator.geolocation.clearWatch(_watchId);
-      _watchId = null;
-      clearInterval(statusTimer);
-      result.classList.remove('hidden');
-      badge.className = 'badge badge-danger'; badge.textContent = '定位失败';
-      var msg = '';
-      if (err.code === 1) msg = '请允许浏览器获取位置权限后重试';
-      else if (err.code === 2) msg = '无法获取位置信号，请移至窗边或室外';
-      else if (err.code === 3) msg = '定位超时，请重试';
-      else msg = err.message || '定位失败';
-      result.innerHTML = '<div class="badge badge-danger">&#x274c; ' + msg + '</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试定位</button>';
-      btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
-    },
-    {enableHighAccuracy: true, timeout: 120000, maximumAge: 0}
-  );
-
-  // Timeout after 90 seconds — use best available reading
-  setTimeout(function() {
-    if (_watchId !== null) {
-      navigator.geolocation.clearWatch(_watchId);
-      _watchId = null;
-      clearInterval(statusTimer);
-
-      if (bestPos && bestPos.accuracy <= 200) {
-        usePosition(bestPos, badge, result, btn);
-      } else if (bestPos) {
-        result.classList.remove('hidden');
-        badge.className = 'badge badge-warning'; badge.textContent = '精度不足';
-        result.innerHTML = '<div class="badge badge-warning">&#x26a0; 精度仅' + bestPos.accuracy.toFixed(0) + 'm，建议移至窗边或室外重试</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试定位</button>';
-        btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
-      } else {
-        result.classList.remove('hidden');
-        badge.className = 'badge badge-danger'; badge.textContent = '定位失败';
-        result.innerHTML = '<div class="badge badge-danger">&#x274c; 未获取到GPS信号，请移至窗边或室外</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试定位</button>';
-        btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
-      }
-    }
-  }, 90000);
 }
 
-function usePosition(pos, badge, result, btn) {
-  userLat = pos.lat;
-  userLng = pos.lng;
-  badge.className = 'badge badge-success';
-  badge.textContent = '已定位 (精度' + pos.accuracy.toFixed(0) + 'm)';
-  result.classList.remove('hidden');
+function fallbackGPS(btn, badge, result) {
+  if (!navigator.geolocation) {
+    result.classList.remove('hidden');
+    result.innerHTML = '<div class="badge badge-danger">Browser does not support geolocation</div>';
+    btn.disabled = false; btn.textContent = 'Get Location';
+    return;
+  }
+  coordSource = 'gps';
+  badge.textContent = 'GPS searching...';
+  navigator.geolocation.getCurrentPosition(
+    function(pos) {
+      userLat = pos.coords.latitude; userLng = pos.coords.longitude;
+      badge.className = 'badge badge-success';
+      badge.textContent = 'GPS (' + pos.coords.accuracy.toFixed(0) + 'm)';
+      validateAndProceed(btn, badge, result);
+    },
+    function(err) {
+      badge.className = 'badge badge-danger'; badge.textContent = 'Failed';
+      var msg = err.code === 1 ? 'Please allow location permission' : err.code === 2 ? 'No GPS signal' : 'Timeout';
+      result.classList.remove('hidden');
+      result.innerHTML = '<div class="badge badge-danger">' + msg + '</div><button class="btn btn-secondary mt-2" onclick="getLocation()">Retry</button>';
+      btn.disabled = false; btn.textContent = 'Get Location';
+    },
+    {enableHighAccuracy: true, timeout: 15000, maximumAge: 0}
+  );
+}
 
+function validateAndProceed(btn, badge, result) {
   if (locationId) {
     fetch(API + '/api/admin/validate-location', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId)}),
+      body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId), source: coordSource}),
     })
-    .then(function(r) { return r.json(); })
+    .then(function(r){return r.json()})
     .then(function(d) {
+      result.classList.remove('hidden');
       if (d.within_range) {
-        result.innerHTML = '<div class="badge badge-success">&#x2705; 在范围内 (' + d.distance_meters + 'm / 允许' + d.max_meters + 'm)</div><p style="font-size:0.78rem;margin-top:4px;color:var(--ink-muted)">' + (d.address || '') + '</p>';
+        result.innerHTML = '<div class="badge badge-success">Within range (' + d.distance_meters + 'm / ' + d.max_meters + 'm)</div><p style="font-size:.78rem;margin-top:4px;color:var(--ink-muted)">' + (d.address || '') + '</p>';
         locationVerified = true;
         showNameStep();
       } else {
-        result.innerHTML = '<div class="badge badge-danger">&#x274c; 超出范围 (' + d.distance_meters + 'm / 允许' + d.max_meters + 'm)</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试</button>';
+        result.innerHTML = '<div class="badge badge-danger">Out of range (' + d.distance_meters + 'm / ' + d.max_meters + 'm)</div><button class="btn btn-secondary mt-2" onclick="getLocation()">Retry</button>';
       }
-      btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
+      btn.disabled = false; btn.textContent = 'Relocate';
     })
-    .catch(function(e) {
-      result.innerHTML = '<div class="badge badge-danger">网络错误，请重试</div><button class="btn btn-secondary mt-2" onclick="getLocation()" style="font-size:0.85rem">&#x1f4cd; 重试</button>';
-      btn.disabled = false; btn.textContent = '&#x1f4cd; 获取位置';
+    .catch(function() {
+      result.classList.remove('hidden');
+      result.innerHTML = '<div class="badge badge-danger">Network error</div><button class="btn btn-secondary mt-2" onclick="getLocation()">Retry</button>';
+      btn.disabled = false; btn.textContent = 'Get Location';
     });
   } else {
     locationVerified = true;
-    result.innerHTML = '<div class="badge badge-success">&#x2705; 定位成功</div>';
     showNameStep();
-    btn.disabled = false; btn.textContent = '&#x1f4cd; 重新定位';
+    btn.disabled = false; btn.textContent = 'Relocate';
   }
 }
 
+// ── Name check-in ────────────────────────────────────────
 function showNameStep() {
   document.getElementById('stepLocation').classList.add('hidden');
   document.getElementById('stepName').classList.remove('hidden');
-  document.getElementById('stepTitle').textContent = '第2步：确认签到';
+  document.getElementById('stepTitle').textContent = 'Step 2: Confirm Check-in';
 }
 
 function submitByName() {
   var name = document.getElementById('userName').value.trim();
-  if (!name) return alert('请输入姓名');
-
+  if (!name) return alert('Please enter your name');
   var btn = document.getElementById('checkinBtn');
   var result = document.getElementById('checkinResult');
-  btn.disabled = true; btn.textContent = '签到中...';
+  btn.disabled = true; btn.textContent = 'Checking in...';
   result.classList.remove('hidden');
-  result.innerHTML = '<div class="spinner" style="margin:0 auto"></div><p class="mt-1">正在签到...</p>';
+  result.innerHTML = '<div class="spinner" style="margin:0 auto"></div><p class="mt-1">Processing...</p>';
 
   var endpoint = qrType === 'checkout' ? '/api/check/out' : '/api/check/in';
   fetch(API + endpoint, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      token: token,
-      face_image_base64: '',
-      latitude: userLat,
-      longitude: userLng,
-      user_name: name,
-    }),
+    body: JSON.stringify({token: token, face_image_base64: '', latitude: userLat, longitude: userLng, user_name: name, source: coordSource}),
   })
-  .then(function(resp) {
-    return resp.json().then(function(data) { return {ok: resp.ok, data: data}; });
-  })
+  .then(function(resp) { return resp.json().then(function(data) { return {ok: resp.ok, data: data}; }); })
   .then(function(r) {
     if (r.ok) {
-      result.innerHTML = '<div class="badge badge-success" style="font-size:1.2rem">&#x2705; ' + (qrType === 'checkout' ? '签退成功' : '签到成功') + '!</div><p class="mt-1" style="font-size:1.1rem;font-weight:700">' + r.data.user_name + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">时间: ' + new Date(r.data.check_in_time).toLocaleString() + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">地点: ' + (r.data.location_name || '-') + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">距离签到点: ' + (r.data.distance_meters || '?') + 'm</p>';
-      if (qrType === 'checkin') {
-        document.getElementById('statusCard').classList.remove('hidden');
-        document.getElementById('statusTitle').textContent = '已签到';
-        document.getElementById('statusDetail').textContent = r.data.user_name + ' - ' + (r.data.location_name || '');
-        document.getElementById('statusTime').textContent = '签到时间: ' + new Date(r.data.check_in_time).toLocaleString();
-      }
+      result.innerHTML = '<div class="badge badge-success" style="font-size:1.2rem">Check-in Successful!</div><p class="mt-1" style="font-size:1.1rem;font-weight:700">' + r.data.user_name + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">' + new Date(r.data.check_in_time).toLocaleString() + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">Location: ' + (r.data.location_name || '-') + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">Distance: ' + (r.data.distance_meters || '?') + 'm</p>';
+      document.getElementById('statusCard').classList.remove('hidden');
+      document.getElementById('statusTitle').textContent = 'Checked In';
       document.getElementById('mainCard').classList.add('hidden');
     } else {
-      result.innerHTML = '<div class="badge badge-danger">&#x274c; ' + (r.data.detail || '操作失败') + '</div>';
-      btn.disabled = false; btn.textContent = '&#x2705; 确认签到';
+      result.innerHTML = '<div class="badge badge-danger">' + (r.data.detail || 'Failed') + '</div>';
+      btn.disabled = false; btn.textContent = 'Confirm Check-in';
     }
   })
   .catch(function(e) {
-    result.innerHTML = '<div class="badge badge-danger">网络错误: ' + e.message + '</div>';
-    btn.disabled = false; btn.textContent = '&#x2705; 确认签到';
+    result.innerHTML = '<div class="badge badge-danger">Network error: ' + e.message + '</div>';
+    btn.disabled = false; btn.textContent = 'Confirm Check-in';
   });
 }
 
 function showToast(msg, type) {
   var t = document.createElement('div');
-  t.className = 'toast toast-' + type;
-  t.textContent = msg;
+  t.className = 'toast toast-' + type; t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(function() { t.remove(); }, 3000);
 }

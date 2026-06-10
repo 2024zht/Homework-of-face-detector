@@ -17,7 +17,7 @@ from services.face_service import (
     extract_embedding, embedding_to_bytes,
     extract_embedding_from_base64,
 )
-from services.location_service import is_within_range, reverse_geocode
+from services.location_service import is_within_range, reverse_geocode, haversine_distance
 from utils.security import decode_access_token
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -323,12 +323,13 @@ async def validate_location(
     if location is None:
         raise HTTPException(status_code=404, detail="Location not found")
 
-    within, distance = is_within_range(
-        req.lat, req.lng,
-        location.latitude, location.longitude,
-        location.radius_meters,
-    )
-    addr = await reverse_geocode(req.lat, req.lng)
+    if getattr(req, 'source', None) == 'amap':
+        distance = haversine_distance(req.lat, req.lng, location.latitude, location.longitude)
+        within = distance <= location.radius_meters
+        addr = await reverse_geocode(req.lat, req.lng)
+    else:
+        within, distance = is_within_range(req.lat, req.lng, location.latitude, location.longitude, location.radius_meters)
+        addr = await reverse_geocode(req.lat, req.lng)
 
     return {
         "within_range": within,

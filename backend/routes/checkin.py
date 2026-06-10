@@ -44,7 +44,11 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
         if location is None:
             raise HTTPException(status_code=400, detail="No active check-in location")
         if req.latitude and req.longitude:
-            within, distance = is_within_range(req.latitude, req.longitude, location.latitude, location.longitude, location.radius_meters)
+            if getattr(req, 'source', None) == 'amap':
+                distance = haversine_distance(req.latitude, req.longitude, location.latitude, location.longitude)
+                within = distance <= location.radius_meters
+            else:
+                within, distance = is_within_range(req.latitude, req.longitude, location.latitude, location.longitude, location.radius_meters)
             if not within:
                 raise HTTPException(status_code=400, detail=f"Out of range: {distance:.0f}m from {location.name}")
         else:
@@ -56,7 +60,17 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
             raise HTTPException(status_code=400, detail="QR code expired or invalid")
         if qr.type != "checkin":
             raise HTTPException(status_code=400, detail="This QR code is for check-out, not check-in")
-        location, distance = await _verify_location(req.latitude, req.longitude, qr.location_id, db)
+        if getattr(req, 'source', None) == 'amap':
+            loc_stmt = select(Location).where(Location.id == qr.location_id, Location.is_active == True)
+            loc_result = await db.execute(loc_stmt)
+            location = loc_result.scalar_one_or_none()
+            if location is None:
+                raise HTTPException(status_code=404, detail="Location not found")
+            distance = haversine_distance(req.latitude, req.longitude, location.latitude, location.longitude)
+            if distance > location.radius_meters:
+                raise HTTPException(status_code=400, detail=f"Out of range: {distance:.0f}m from {location.name}")
+        else:
+            location, distance = await _verify_location(req.latitude, req.longitude, qr.location_id, db)
         location_name = await reverse_geocode(req.latitude, req.longitude)
         await mark_qr_used(db, req.token)
 
