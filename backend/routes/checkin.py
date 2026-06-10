@@ -2,7 +2,7 @@
 import uuid, os, tempfile
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
@@ -360,6 +360,32 @@ async def batch_checkin_video(
         "processing_time_seconds": result["processing_time_seconds"],
         "total_checked_in": len(checked_in),
     }
+
+
+@router.post("/self-out")
+async def self_checkout(request: Request, db: AsyncSession = Depends(get_db)):
+    """Any authenticated user can sign themselves out."""
+    from utils.security import decode_access_token
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(auth[7:])
+    if payload is None:
+        raise HTTPException(status_code=401)
+    user_id = int(payload["sub"])
+
+    active_stmt = select(CheckIn).where(CheckIn.user_id == user_id, CheckIn.status == "active")
+    active_result = await db.execute(active_stmt)
+    checkin = active_result.scalar_one_or_none()
+    if checkin is None:
+        raise HTTPException(status_code=400, detail="No active check-in")
+
+    checkin.check_out_time = datetime.utcnow()
+    checkin.status = "completed"
+    checkin.is_auto_checkout = False
+    await db.commit()
+    await db.refresh(checkin)
+    return {"id": checkin.id, "status": "completed", "check_out_time": checkin.check_out_time.isoformat()}
 
 
 async def auto_checkout_expired(db: AsyncSession):

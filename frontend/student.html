@@ -32,6 +32,7 @@
     <h2 class="mt-1" id="statusTitle">加载中...</h2>
     <p id="statusDetail" style="font-size:.9rem"></p>
     <p id="statusTime" style="font-size:.78rem;color:var(--ink-muted)"></p>
+    <button class="btn btn-danger mt-2 hidden" id="signoutBtn" onclick="doSignOut()" style="margin:8px auto 0">&#x1f6aa; 签退</button>
   </div>
 
   <!-- Options -->
@@ -97,11 +98,14 @@ async function loadAll() {
     var t = '签到: ' + new Date(d.check_in_time).toLocaleString();
     if (d.auto_checkout_at) t += ' | 自动签退: ' + new Date(d.auto_checkout_at).toLocaleTimeString();
     document.getElementById('statusTime').textContent = t;
+    // Show sign-out button
+    document.getElementById('signoutBtn').classList.remove('hidden');
   } else {
     document.getElementById('statusIcon').innerHTML = '&#x274c;';
     document.getElementById('statusTitle').textContent = '未签到';
     document.getElementById('statusDetail').textContent = '请选择下方签到方式';
     document.getElementById('statusTime').textContent = '';
+    document.getElementById('signoutBtn').classList.add('hidden');
   }
 
   // History
@@ -187,6 +191,25 @@ function takeFacePhoto() {
     result.innerHTML = '<div class="badge badge-danger">' + e.message + '</div>';
     btn.disabled = false; btn.textContent = '重试';
   });
+}
+
+async function doSignOut() {
+  if (!confirm('确认签退？')) return;
+  var btn = document.getElementById('signoutBtn');
+  btn.disabled = true; btn.textContent = '签退中...';
+  try {
+    var r = await api('/api/check/self-out', {method: 'POST'});
+    var d = await r.json();
+    if (d.status === 'completed') {
+      loadAll();
+    } else {
+      alert(d.detail || '签退失败');
+      btn.disabled = false; btn.textContent = '签退';
+    }
+  } catch(e) {
+    alert('网络错误');
+    btn.disabled = false; btn.textContent = '签退';
+  }
 }
 
 function logout() { localStorage.clear(); if(_refreshTimer) clearInterval(_refreshTimer); window.location.href = '/login.html'; }
