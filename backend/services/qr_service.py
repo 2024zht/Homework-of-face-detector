@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from config import QRCODE_DIR, QR_EXPIRE_MINUTES
 from models import QRSession
+from utils.time_utils import beijing_now_naive
 
 
 async def generate_qr_session(
@@ -24,7 +25,7 @@ async def generate_qr_session(
         type=qr_type,
         location_id=location_id,
         generated_by=generated_by,
-        expires_at=datetime.utcnow() + timedelta(minutes=QR_EXPIRE_MINUTES),
+        expires_at=beijing_now_naive() + timedelta(minutes=QR_EXPIRE_MINUTES),
     )
     db.add(session)
     await db.commit()

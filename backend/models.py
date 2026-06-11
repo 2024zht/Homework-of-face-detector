@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, LargeBinary
 from sqlalchemy.orm import relationship
 from database import Base
+from utils.time_utils import beijing_now_naive
 
 
 def gen_uuid():
@@ -21,7 +22,7 @@ class User(Base):
     face_embedding = Column(LargeBinary, nullable=True)  # numpy float32 array as bytes
     face_photo_path = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=beijing_now_naive)
 
     checkins = relationship("CheckIn", back_populates="user")
     qr_sessions = relationship("QRSession", back_populates="generator")
@@ -37,7 +38,7 @@ class Location(Base):
     radius_meters = Column(Integer, default=100)
     created_by = Column(Integer, ForeignKey("users.id"))
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=beijing_now_naive)
 
     creator = relationship("User")
 
@@ -47,7 +48,7 @@ class CheckIn(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    check_in_time = Column(DateTime, default=datetime.utcnow, index=True)
+    check_in_time = Column(DateTime, default=beijing_now_naive, index=True)
     check_out_time = Column(DateTime, nullable=True)
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
     lat = Column(Float, nullable=True)  # actual position at check-in
@@ -70,7 +71,7 @@ class QRSession(Base):
     type = Column(String(10), nullable=False)  # checkin, checkout
     location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
     generated_by = Column(Integer, ForeignKey("users.id"))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=beijing_now_naive)
     expires_at = Column(DateTime, nullable=False)
     is_used = Column(Boolean, default=False)
 
@@ -78,4 +79,4 @@ class QRSession(Base):
     location = relationship("Location")
 
     def is_expired(self) -> bool:
-        return datetime.utcnow() > self.expires_at
+        return beijing_now_naive() > self.expires_at

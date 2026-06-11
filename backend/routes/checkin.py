@@ -13,6 +13,7 @@ from services.face_service import extract_embedding_from_base64, match_face, sav
 from services.location_service import is_within_range, reverse_geocode
 from services.qr_service import validate_qr_token, mark_qr_used
 from config import AUTO_CHECKOUT_HOURS
+from utils.time_utils import beijing_now_naive
 
 router = APIRouter(prefix="/api/check", tags=["check"])
 
@@ -194,7 +195,7 @@ async def check_out(req: CheckOutRequest, db: AsyncSession = Depends(get_db)):
         photo_filename = f"checkout_{user_id}_{uuid.uuid4().hex[:8]}.jpg"
         checkin.check_out_photo = save_checkin_photo(req.face_image_base64, photo_filename)
 
-    checkin.check_out_time = datetime.utcnow()
+    checkin.check_out_time = beijing_now_naive()
     checkin.status = "completed"
     checkin.is_auto_checkout = False
 
@@ -306,7 +307,7 @@ async def batch_checkin_video(
     # 6. Batch check-in matched users
     checked_in = []
     skipped = []
-    now = datetime.utcnow()
+    now = beijing_now_naive()
 
     for match in result["matched_users"]:
         uid = match["user_id"]
@@ -381,7 +382,7 @@ async def self_checkout(request: Request, db: AsyncSession = Depends(get_db)):
     if checkin is None:
         raise HTTPException(status_code=400, detail="No active check-in")
 
-    checkin.check_out_time = datetime.utcnow()
+    checkin.check_out_time = beijing_now_naive()
     checkin.status = "completed"
     checkin.is_auto_checkout = False
     await db.commit()
@@ -391,7 +392,7 @@ async def self_checkout(request: Request, db: AsyncSession = Depends(get_db)):
 
 async def auto_checkout_expired(db: AsyncSession):
     """Called by background task: auto sign-out expired check-ins."""
-    cutoff = datetime.utcnow() - timedelta(hours=AUTO_CHECKOUT_HOURS)
+    cutoff = beijing_now_naive() - timedelta(hours=AUTO_CHECKOUT_HOURS)
     stmt = select(CheckIn).where(
         CheckIn.status == "active",
         CheckIn.check_in_time <= cutoff,

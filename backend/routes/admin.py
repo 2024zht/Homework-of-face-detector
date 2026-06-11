@@ -2,6 +2,7 @@
 import base64
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
@@ -9,6 +10,7 @@ from typing import Optional
 
 from database import get_db
 from models import User, CheckIn, Location
+from utils.time_utils import beijing_now_naive
 from schemas import (
     UserCreate, UserResponse, LocationCreate, LocationResponse,
     CheckInRecord, StatisticsResponse, LocationValidateRequest,
@@ -98,27 +100,25 @@ async def create_user(
     )
 
 
+class FaceReg(BaseModel):
+    face_image_base64: str
+
+
 @router.post("/users/{user_id}/face")
 async def register_face(
     user_id: int,
-    face_image_base64: str,
+    body: FaceReg,
     db: AsyncSession = Depends(get_db),
     _admin=Depends(get_current_admin),
 ):
     """Register a face for a user. Body: {"face_image_base64": "..."}"""
-    from pydantic import BaseModel
-
-    class FaceReg(BaseModel):
-        face_image_base64: str
-
-    # Handle both form and JSON
     stmt = select(User).where(User.id == user_id)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    embedding = extract_embedding_from_base64(face_image_base64)
+    embedding = extract_embedding_from_base64(body.face_image_base64)
     if embedding is None:
         raise HTTPException(status_code=400, detail="No face detected in image")
 
@@ -126,7 +126,7 @@ async def register_face(
 
     # Save photo
     from services.face_service import save_checkin_photo
-    photo_path = save_checkin_photo(face_image_base64, f"face_user_{user_id}.jpg")
+    photo_path = save_checkin_photo(body.face_image_base64, f"face_user_{user_id}.jpg")
     user.face_photo_path = photo_path
 
     await db.commit()
@@ -204,7 +204,7 @@ async def get_statistics(
     if date:
         target_date = datetime.strptime(date, "%Y-%m-%d").date()
     else:
-        target_date = datetime.utcnow().date()
+        target_date = beijing_now_naive().date()
 
     day_start = datetime(target_date.year, target_date.month, target_date.day)
     day_end = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
