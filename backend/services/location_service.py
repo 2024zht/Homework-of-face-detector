@@ -66,15 +66,27 @@ def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> fl
 def is_within_range(
     user_lat: float, user_lng: float,
     target_lat: float, target_lng: float,
-    radius_meters: float = 100
+    radius_meters: float = 100,
+    source: Optional[str] = None
 ) -> Tuple[bool, float]:
     """
     Check if user is within the target location's radius.
-    Phone GPS (WGS-84) is converted to GCJ-02 to match Gaode coordinates.
+    Calculates distances for all WGS-84 / GCJ-02 combinations to auto-resolve 500m offset.
     Returns (is_within, distance_meters).
     """
-    distance = haversine_distance(user_lat, user_lng, target_lat, target_lng)
-    return distance <= radius_meters, distance
+    # 1. Both same coordinate system (WGS vs WGS, or GCJ vs GCJ)
+    d1 = haversine_distance(user_lat, user_lng, target_lat, target_lng)
+
+    # 2. User is WGS-84, Target is GCJ-02
+    u_gcj_lat, u_gcj_lng = wgs84_to_gcj02(user_lat, user_lng)
+    d2 = haversine_distance(u_gcj_lat, u_gcj_lng, target_lat, target_lng)
+
+    # 3. User is GCJ-02, Target is WGS-84
+    t_gcj_lat, t_gcj_lng = wgs84_to_gcj02(target_lat, target_lng)
+    d3 = haversine_distance(user_lat, user_lng, t_gcj_lat, t_gcj_lng)
+
+    best_distance = min(d1, d2, d3)
+    return best_distance <= radius_meters, best_distance
 
 
 def _amap_sig(params: dict) -> str:

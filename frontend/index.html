@@ -64,7 +64,7 @@
 <script>
 var API = window.location.origin;
 var token = null, qrType = null, locationId = null;
-var userLat = null, userLng = null, locationVerified = false;
+var userLat = null, userLng = null, locationVerified = false, coordSource = null;
 
 (function() {
   var p = new URLSearchParams(window.location.search);
@@ -124,14 +124,14 @@ function getLocation() {
   // Try Gaode first
   if (_amapReady && window.AMap) {
     window.AMap.plugin('AMap.Geolocation', function() {
-      var geo = new window.AMap.Geolocation({enableHighAccuracy: true, timeout: 15000});
+      var geo = new window.AMap.Geolocation({enableHighAccuracy: true, timeout: 5000});
       geo.getCurrentPosition(function(status, amapResult) {
         if (status === 'complete' && amapResult.position) {
           userLat = amapResult.position.lat;
           userLng = amapResult.position.lng;
           badge.className = 'badge badge-success';
           badge.textContent = '已定位 (' + (amapResult.accuracy || 30).toFixed(0) + 'm)';
-          validateAndProceed(btn, badge, result);
+          validateAndProceed(btn, badge, result, 'amap');
           return;
         }
         fallbackGPS(btn, badge, result);
@@ -156,25 +156,26 @@ function fallbackGPS(btn, badge, result) {
       userLat = pos.coords.latitude; userLng = pos.coords.longitude;
       badge.className = 'badge badge-success';
       badge.textContent = '已定位 (' + pos.coords.accuracy.toFixed(0) + 'm)';
-      validateAndProceed(btn, badge, result);
+      validateAndProceed(btn, badge, result, 'wgs84');
     },
     function(err) {
       badge.className = 'badge badge-danger'; badge.textContent = '定位失败';
       var msg = err.code === 1 ? '请允许位置权限' : err.code === 2 ? '无GPS信号，请移至窗边' : '超时';
       result.classList.remove('hidden');
-      result.innerHTML = '<div class="badge badge-danger">' + msg + '</div><button class="btn btn-secondary mt-2" onclick="getLocation()">重试</button>';
+      result.innerHTML = '<div style="margin-bottom:8px;"><span class="badge badge-danger">' + msg + '</span></div><div style="text-align:center;"><button class="btn btn-secondary mt-2" onclick="getLocation()">重试</button></div>';
       btn.disabled = false; btn.textContent = '获取位置';
     },
     {enableHighAccuracy: true, timeout: 90000, maximumAge: 0}
   );
 }
 
-function validateAndProceed(btn, badge, result) {
+function validateAndProceed(btn, badge, result, source) {
+  coordSource = source;
   if (locationId) {
     fetch(API + '/api/admin/validate-location', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId)}),
+      body: JSON.stringify({lat: userLat, lng: userLng, location_id: parseInt(locationId), source: source}),
     })
     .then(function(r){return r.json()})
     .then(function(d) {
@@ -184,13 +185,13 @@ function validateAndProceed(btn, badge, result) {
         locationVerified = true;
         showNameStep();
       } else {
-        result.innerHTML = '<div class="badge badge-danger">&#x274c; 超出范围 (' + d.distance_meters + 'm / ' + d.max_meters + 'm)</div><button class="btn btn-secondary mt-2" onclick="getLocation()">重试</button>';
+        result.innerHTML = '<div style="margin-bottom:8px;"><span class="badge badge-danger">&#x274c; 超出范围 (' + d.distance_meters + 'm / ' + d.max_meters + 'm)</span></div><div style="text-align:center;"><button class="btn btn-secondary mt-2" onclick="getLocation()">重试</button></div>';
       }
       btn.disabled = false; btn.textContent = '重新定位';
     })
     .catch(function() {
       result.classList.remove('hidden');
-      result.innerHTML = '<div class="badge badge-danger">网络错误</div><button class="btn btn-secondary mt-2" onclick="getLocation()">重试</button>';
+      result.innerHTML = '<div style="margin-bottom:8px;"><span class="badge badge-danger">网络错误</span></div><div style="text-align:center;"><button class="btn btn-secondary mt-2" onclick="getLocation()">重试</button></div>';
       btn.disabled = false; btn.textContent = '获取位置';
     });
   } else {
@@ -219,7 +220,7 @@ function submitByName() {
   fetch(API + endpoint, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({token: token, face_image_base64: '', latitude: userLat, longitude: userLng, user_name: name}),
+    body: JSON.stringify({token: token, face_image_base64: '', latitude: userLat, longitude: userLng, user_name: name, source: coordSource}),
   })
   .then(function(resp) { return resp.json().then(function(data) { return {ok: resp.ok, data: data}; }); })
   .then(function(r) {

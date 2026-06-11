@@ -102,7 +102,10 @@ async function loadAll() {
     if (d.auto_checkout_at) t += ' | 自动签退: ' + new Date(d.auto_checkout_at).toLocaleTimeString();
     document.getElementById('statusTime').textContent = t;
     // Show sign-out button
-    document.getElementById('signoutBtn').classList.remove('hidden');
+    var soBtn = document.getElementById('signoutBtn');
+    soBtn.classList.remove('hidden');
+    soBtn.disabled = false;
+    soBtn.innerHTML = '&#x1f6aa; 签退';
   } else {
     document.getElementById('statusIcon').innerHTML = '&#x274c;';
     document.getElementById('statusTitle').textContent = '未签到';
