@@ -30,8 +30,48 @@
     </div>
     <button type="submit" class="btn btn-primary btn-block btn-lg mt-2" id="loginBtn">登 录</button>
   </form>
+  <p class="text-center mt-2">
+    <a href="#" onclick="showForgotModal()" style="color:var(--brand);font-size:0.85rem;text-decoration:none;cursor:pointer">忘记密码?</a>
+  </p>
   <p class="text-center mt-2" style="font-size:0.8rem;color:var(--ink-muted)">默认管理员: admin / admin123</p>
   <div id="loginMsg" class="text-center mt-2" style="color:var(--danger);font-size:0.85rem"></div>
+</div>
+
+<!-- Forgot password modal -->
+<div class="modal-overlay hidden" id="forgotModal">
+  <div class="modal" style="max-width:400px">
+    <h3 id="forgotTitle">忘记密码</h3>
+    <div id="forgotStep1">
+      <p style="font-size:0.9rem;color:var(--ink-secondary);margin-bottom:12px">请输入你的用户名</p>
+      <div class="input-group">
+        <label>用户名</label>
+        <input type="text" class="input" id="forgotUsername" placeholder="输入用户名">
+      </div>
+      <button class="btn btn-primary btn-block" onclick="checkForgotUser()">下一步</button>
+    </div>
+    <div id="forgotStep2" class="hidden">
+      <p style="font-size:0.9rem;color:var(--ink-secondary);margin-bottom:12px">请面对摄像头进行人脸验证</p>
+      <div style="position:relative;width:100%;border-radius:var(--radius);overflow:hidden;background:#000;aspect-ratio:4/3;margin-bottom:12px">
+        <video id="forgotVideo" autoplay playsinline style="width:100%;height:100%;object-fit:cover"></video>
+        <canvas id="forgotCanvas" class="hidden"></canvas>
+      </div>
+      <button class="btn btn-primary btn-block" onclick="captureForgotFace()" id="forgotCaptureBtn">📷 拍照验证</button>
+    </div>
+    <div id="forgotStep3" class="hidden">
+      <p style="font-size:0.9rem;color:var(--ink-secondary);margin-bottom:12px">人脸验证通过，请设置新密码</p>
+      <div class="input-group">
+        <label>新密码</label>
+        <input type="password" class="input" id="forgotNewPassword" placeholder="至少4位" minlength="4">
+      </div>
+      <div class="input-group">
+        <label>确认密码</label>
+        <input type="password" class="input" id="forgotConfirmPassword" placeholder="再次输入新密码" minlength="4">
+      </div>
+      <button class="btn btn-primary btn-block" onclick="doResetPassword()">重置密码</button>
+    </div>
+    <div id="forgotMsg" class="text-center mt-2 hidden"></div>
+    <button class="btn btn-secondary btn-block mt-2" onclick="closeForgotModal()">关闭</button>
+  </div>
 </div>
 
 <script>
@@ -70,6 +110,125 @@ document.getElementById('loginForm').addEventListener('submit', async (e) => {
     btn.disabled = false; btn.textContent = '登 录';
   }
 });
+
+// ── Forgot password flow ────────────────────────────────
+let forgotStream = null;
+let forgotFaceB64 = null;
+let forgotUsername = '';
+
+function showForgotModal() {
+  document.getElementById('forgotModal').classList.remove('hidden');
+  document.getElementById('forgotStep1').classList.remove('hidden');
+  document.getElementById('forgotStep2').classList.add('hidden');
+  document.getElementById('forgotStep3').classList.add('hidden');
+  document.getElementById('forgotMsg').classList.add('hidden');
+  document.getElementById('forgotUsername').value = '';
+  document.getElementById('forgotNewPassword').value = '';
+  document.getElementById('forgotConfirmPassword').value = '';
+  forgotFaceB64 = null;
+  forgotUsername = '';
+  if (forgotStream) { forgotStream.getTracks().forEach(t => t.stop()); forgotStream = null; }
+}
+
+function closeForgotModal() {
+  document.getElementById('forgotModal').classList.add('hidden');
+  if (forgotStream) { forgotStream.getTracks().forEach(t => t.stop()); forgotStream = null; }
+}
+
+async function checkForgotUser() {
+  const username = document.getElementById('forgotUsername').value.trim();
+  if (!username) return alert('请输入用户名');
+  forgotUsername = username;
+  const msg = document.getElementById('forgotMsg');
+  msg.classList.remove('hidden');
+  msg.style.color = 'var(--ink-muted)';
+  msg.textContent = '查询中...';
+
+  try {
+    const res = await fetch(API + '/api/auth/forgot-password', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username}),
+    });
+    const data = await res.json();
+    if (!data.exists) {
+      msg.style.color = 'var(--danger)';
+      msg.textContent = '用户不存在';
+    } else if (!data.has_face) {
+      msg.style.color = 'var(--danger)';
+      msg.textContent = '该用户未注册人脸，请联系管理员重置密码';
+    } else {
+      msg.classList.add('hidden');
+      document.getElementById('forgotStep1').classList.add('hidden');
+      document.getElementById('forgotStep2').classList.remove('hidden');
+      startForgotCamera();
+    }
+  } catch (err) {
+    msg.style.color = 'var(--danger)';
+    msg.textContent = '网络错误: ' + err.message;
+  }
+}
+
+async function startForgotCamera() {
+  try {
+    forgotStream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'user', width: 640, height: 480}});
+    document.getElementById('forgotVideo').srcObject = forgotStream;
+  } catch (err) {
+    const msg = document.getElementById('forgotMsg');
+    msg.classList.remove('hidden');
+    msg.style.color = 'var(--danger)';
+    msg.textContent = '无法打开摄像头: ' + err.message;
+  }
+}
+
+function captureForgotFace() {
+  const video = document.getElementById('forgotVideo');
+  const canvas = document.getElementById('forgotCanvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  forgotFaceB64 = canvas.toDataURL('image/jpeg', 0.85);
+  if (forgotStream) { forgotStream.getTracks().forEach(t => t.stop()); forgotStream = null; }
+  document.getElementById('forgotStep2').classList.add('hidden');
+  document.getElementById('forgotStep3').classList.remove('hidden');
+}
+
+async function doResetPassword() {
+  const newPwd = document.getElementById('forgotNewPassword').value;
+  const confirmPwd = document.getElementById('forgotConfirmPassword').value;
+  const msg = document.getElementById('forgotMsg');
+
+  if (!newPwd || newPwd.length < 4) { msg.classList.remove('hidden'); msg.style.color='var(--danger)'; msg.textContent='密码至少4位'; return; }
+  if (newPwd !== confirmPwd) { msg.classList.remove('hidden'); msg.style.color='var(--danger)'; msg.textContent='两次密码不一致'; return; }
+
+  msg.classList.remove('hidden');
+  msg.style.color = 'var(--ink-muted)';
+  msg.textContent = '验证中...';
+
+  try {
+    const res = await fetch(API + '/api/auth/reset-password', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        username: forgotUsername,
+        face_image_base64: forgotFaceB64,
+        new_password: newPwd,
+      }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      msg.style.color = 'var(--success)';
+      msg.textContent = data.message || '密码重置成功，请登录';
+      setTimeout(closeForgotModal, 2000);
+    } else {
+      msg.style.color = 'var(--danger)';
+      msg.textContent = data.detail || '重置失败';
+    }
+  } catch (err) {
+    msg.style.color = 'var(--danger)';
+    msg.textContent = '网络错误: ' + err.message;
+  }
+}
 </script>
 </body>
 </html>

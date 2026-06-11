@@ -136,3 +136,28 @@ class LocationValidateRequest(BaseModel):
     lng: float
     location_id: int
     source: Optional[str] = None  # "amap"=GCJ-02
+
+
+# ── Password Reset ─────────────────────────────────────────
+class ForgotPasswordRequest(BaseModel):
+    """Check if a user can reset password via face verification"""
+    username: str
+
+
+class ForgotPasswordResponse(BaseModel):
+    """Tells frontend whether user exists and has face registered"""
+    exists: bool
+    has_face: bool
+    message: str
+
+
+class ResetPasswordRequest(BaseModel):
+    """Face-verified password reset"""
+    username: str
+    face_image_base64: str
+    new_password: str = Field(min_length=4, max_length=128)
+
+
+class AdminResetPasswordRequest(BaseModel):
+    """Admin resets a user's password"""
+    new_password: str = Field(default="123456", min_length=4, max_length=128)

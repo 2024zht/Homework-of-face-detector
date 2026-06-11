@@ -26,7 +26,10 @@
     <div class="stats-grid" id="statsGrid"></div>
 
     <div class="card mt-2">
-      <h3 class="mb-2">最近签到记录</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center" class="mb-2">
+        <h3>最近签到记录</h3>
+        <button class="btn btn-secondary" onclick="exportExcel()" style="padding:6px 14px;font-size:0.85rem">📥 导出Excel</button>
+      </div>
       <div class="table-wrap"><table id="recentTable"><thead><tr><th>姓名</th><th>角色</th><th>签到时间</th><th>签退时间</th><th>地点</th><th>状态</th></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
@@ -91,11 +94,12 @@
   <div id="tab-records" class="hidden">
     <h2 class="mb-2">&#x1f4dd; 签到记录</h2>
     <div class="card">
-      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
         <input type="date" class="input" id="recordDate" style="width:auto" onchange="loadRecords()">
         <select class="input" id="recordStatus" style="width:auto" onchange="loadRecords()">
           <option value="">全部状态</option><option value="active">进行中</option><option value="completed">已完成</option>
         </select>
+        <button class="btn btn-primary" onclick="exportExcel()" style="padding:8px 16px;font-size:0.85rem">📥 导出Excel</button>
       </div>
       <div class="table-wrap"><table id="recordsTable"><thead><tr><th>姓名</th><th>签到</th><th>签退</th><th>地点</th><th>时长</th><th>方式</th></tr></thead><tbody></tbody></table></div>
     </div>
@@ -228,6 +232,7 @@ async function loadUsers() {
     <td>${u.is_active ? '正常' : '禁用'}</td>
     <td>
       ${!u.has_face ? `<button class="btn btn-secondary" style="padding:4px 10px;font-size:0.78rem" onclick="registerFace(${u.id})">注册人脸</button>` : ''}
+      <button class="btn btn-secondary" style="padding:4px 10px;font-size:0.78rem" onclick="resetUserPassword(${u.id}, '${u.name}')">重置密码</button>
       <button class="btn btn-danger" style="padding:4px 10px;font-size:0.78rem" onclick="deactivateUser(${u.id})">禁用</button>
     </td></tr>
   `).join('');
@@ -278,6 +283,55 @@ async function deactivateUser(id) {
   if (confirm('确认禁用此用户？')) {
     await api(`/api/admin/users/${id}/deactivate`, {method:'POST'});
     loadUsers();
+  }
+}
+
+async function resetUserPassword(userId, userName) {
+  const newPwd = prompt('为 ' + userName + ' 设置新密码（默认123456）:', '123456');
+  if (newPwd === null) return;
+  if (!newPwd || newPwd.length < 4) return alert('密码至少4位');
+
+  const r = await api(`/api/admin/users/${userId}/reset-password`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({new_password: newPwd}),
+  });
+  if (r.ok) {
+    alert('密码已重置为: ' + newPwd);
+  } else {
+    const d = await r.json();
+    alert(d.detail || '重置失败');
+  }
+}
+
+async function exportExcel() {
+  const params = new URLSearchParams();
+  const dateInput = document.getElementById('recordDate');
+  if (dateInput && dateInput.value) params.set('date', dateInput.value);
+  const statusSelect = document.getElementById('recordStatus');
+  if (statusSelect && statusSelect.value) params.set('status', statusSelect.value);
+
+  try {
+    const res = await api('/api/admin/export?' + params.toString());
+    if (!res.ok) {
+      const err = await res.json();
+      alert(err.detail || '导出失败');
+      return;
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const disposition = res.headers.get('Content-Disposition');
+    a.download = disposition
+      ? disposition.split('filename=')[1].replace(/"/g, '')
+      : '签到记录.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch (err) {
+    alert('导出失败: ' + err.message);
   }
 }
 

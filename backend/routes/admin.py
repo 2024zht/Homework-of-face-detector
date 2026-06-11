@@ -1,12 +1,18 @@
 """Admin management routes"""
 import base64
+import io
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
 from typing import Optional
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+import bcrypt
 
 from database import get_db
 from models import User, CheckIn, Location
@@ -14,6 +20,7 @@ from utils.time_utils import beijing_now_naive
 from schemas import (
     UserCreate, UserResponse, LocationCreate, LocationResponse,
     CheckInRecord, StatisticsResponse, LocationValidateRequest,
+    AdminResetPasswordRequest,
 )
 from services.face_service import (
     extract_embedding, embedding_to_bytes,
@@ -333,3 +340,194 @@ async def validate_location(
         "location_name": location.name,
         "address": addr,
     }
+
+
+# ── Admin password reset ──────────────────────────────────
+@router.post("/users/{user_id}/reset-password")
+async def admin_reset_password(
+    user_id: int,
+    req: AdminResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(get_current_admin),
+):
+    """Admin resets a user's password."""
+    stmt = select(User).where(User.id == user_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.password_hash = bcrypt.hashpw(req.new_password.encode(), bcrypt.gensalt()).decode()
+    await db.commit()
+
+    return {"success": True, "message": f"密码已重置为: {req.new_password}"}
+
+
+# ── Excel export ──────────────────────────────────────────
+@router.get("/export")
+async def export_checkins(
+    date: Optional[str] = None,
+    user_id: Optional[int] = None,
+    status: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(get_current_admin),
+):
+    """Export checkin records as Excel file."""
+    # Build query (same filters as list_checkins, no limit)
+    stmt = select(CheckIn).options(selectinload(CheckIn.user))
+    if date:
+        target_date = datetime.strptime(date, "%Y-%m-%d").date()
+        day_start = datetime(target_date.year, target_date.month, target_date.day)
+        day_end = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
+        stmt = stmt.where(CheckIn.check_in_time >= day_start, CheckIn.check_in_time <= day_end)
+    if user_id:
+        stmt = stmt.where(CheckIn.user_id == user_id)
+    if status:
+        stmt = stmt.where(CheckIn.status == status)
+
+    stmt = stmt.order_by(CheckIn.check_in_time.desc())
+    result = await db.execute(stmt)
+    records = result.scalars().all()
+
+    # ── Build Excel workbook ──
+    wb = Workbook()
+
+    # Styles
+    header_font = Font(bold=True, size=11)
+    header_fill = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
+    title_font = Font(bold=True, size=14)
+    thin_border = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin"),
+    )
+    alt_fill = PatternFill(start_color="F2F7FB", end_color="F2F7FB", fill_type="solid")
+
+    # ── Sheet 1: Summary ──
+    ws1 = wb.active
+    ws1.title = "签到统计汇总"
+
+    ws1.merge_cells("A1:F1")
+    ws1["A1"] = "实验室签到记录统计汇总"
+    ws1["A1"].font = title_font
+    ws1["A1"].alignment = Alignment(horizontal="center")
+
+    export_time = beijing_now_naive().strftime("%Y-%m-%d %H:%M")
+    ws1.merge_cells("A2:F2")
+    ws1["A2"] = f"导出时间: {export_time}  日期: {date or '全部'}  状态: {status or '全部'}"
+    ws1["A2"].alignment = Alignment(horizontal="center")
+
+    # Summary stats
+    active_count = sum(1 for r in records if r.status == "active")
+    completed_count = sum(1 for r in records if r.status == "completed")
+    auto_count = sum(1 for r in records if r.is_auto_checkout)
+
+    summary_headers = ["指标", "数值"]
+    for col, h in enumerate(summary_headers, 1):
+        cell = ws1.cell(row=4, column=col, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+
+    summary_data = [
+        ("总记录数", len(records)),
+        ("进行中", active_count),
+        ("已完成", completed_count),
+        ("自动签退", auto_count),
+    ]
+    for i, (label, val) in enumerate(summary_data, 5):
+        ws1.cell(row=i, column=1, value=label).border = thin_border
+        ws1.cell(row=i, column=2, value=val).border = thin_border
+
+    # Per-user breakdown
+    ws1.cell(row=10, column=1, value="按用户统计").font = Font(bold=True, size=12)
+    user_headers = ["用户名", "姓名", "角色", "签到次数", "平均时长(min)"]
+    for col, h in enumerate(user_headers, 1):
+        cell = ws1.cell(row=11, column=col, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+
+    # Aggregate by user
+    user_stats = {}
+    for r in records:
+        uid = r.user_id
+        if uid not in user_stats:
+            user_stats[uid] = {
+                "username": r.user.username if r.user else f"User#{uid}",
+                "name": r.user.name if r.user else "",
+                "role": r.user.role if r.user else "student",
+                "count": 0, "durations": [],
+            }
+        user_stats[uid]["count"] += 1
+        if r.check_out_time:
+            dur = (r.check_out_time - r.check_in_time).total_seconds() / 60
+            user_stats[uid]["durations"].append(dur)
+
+    row = 12
+    for uid, stats in user_stats.items():
+        avg_dur = sum(stats["durations"]) / len(stats["durations"]) if stats["durations"] else 0
+        for col, val in enumerate([stats["username"], stats["name"], stats["role"], stats["count"], round(avg_dur, 1)], 1):
+            cell = ws1.cell(row=row, column=col, value=val)
+            cell.border = thin_border
+            if row % 2 == 0:
+                cell.fill = alt_fill
+        row += 1
+
+    # Auto-width for sheet 1
+    for col in range(1, 7):
+        ws1.column_dimensions[get_column_letter(col)].width = 18
+
+    # ── Sheet 2: Detail records ──
+    ws2 = wb.create_sheet("签到明细记录")
+    detail_headers = ["序号", "姓名", "用户名", "角色", "签到时间", "签退时间", "签到点", "时长(分钟)", "状态", "签到方式"]
+
+    for col, h in enumerate(detail_headers, 1):
+        cell = ws2.cell(row=1, column=col, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal="center")
+
+    for i, r in enumerate(records, 1):
+        user = r.user
+        duration = ""
+        if r.check_out_time:
+            duration = round((r.check_out_time - r.check_in_time).total_seconds() / 60, 1)
+
+        method = "自动签退" if r.is_auto_checkout else ("进行中" if r.status == "active" else "手动签退")
+        status_text = "进行中" if r.status == "active" else "已完成"
+
+        row_data = [
+            i,
+            user.name if user else f"User#{r.user_id}",
+            user.username if user else "",
+            user.role if user else "student",
+            r.check_in_time.strftime("%Y-%m-%d %H:%M:%S") if r.check_in_time else "",
+            r.check_out_time.strftime("%Y-%m-%d %H:%M:%S") if r.check_out_time else "",
+            r.location_name or "",
+            duration,
+            status_text,
+            method,
+        ]
+        for col, val in enumerate(row_data, 1):
+            cell = ws2.cell(row=i + 1, column=col, value=val)
+            cell.border = thin_border
+            if i % 2 == 0:
+                cell.fill = alt_fill
+
+    # Auto-width for sheet 2
+    col_widths = [6, 10, 12, 8, 20, 20, 18, 12, 8, 10]
+    for col, w in enumerate(col_widths, 1):
+        ws2.column_dimensions[get_column_letter(col)].width = w
+
+    # ── Stream response ──
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f"签到记录_{date or beijing_now_naive().strftime('%Y-%m-%d')}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
