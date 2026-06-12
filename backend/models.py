@@ -24,7 +24,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=beijing_now_naive)
 
-    checkins = relationship("CheckIn", back_populates="user")
+    checkins = relationship("CheckIn", back_populates="user", foreign_keys="[CheckIn.user_id]")
     qr_sessions = relationship("QRSession", back_populates="generator")
 
 
