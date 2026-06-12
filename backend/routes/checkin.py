@@ -61,12 +61,31 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
         location_name = await reverse_geocode(req.latitude, req.longitude)
         await mark_qr_used(db, req.token)
 
-    # 3. Identify user: face recognition OR name match
+    # 3. Identify user — name-verified face recognition (priority order)
     user_id = None
     embedding = None
+    user_name = getattr(req, 'user_name', None)
+    user_name = user_name.strip() if user_name else None
 
-    # Try face recognition if image provided
-    if req.face_image_base64 and req.face_image_base64.strip():
+    if user_name and req.face_image_base64 and req.face_image_base64.strip():
+        # Priority 1: name + face → 1:1 verification (most secure)
+        embedding = extract_embedding_from_base64(req.face_image_base64)
+        if embedding is None:
+            raise HTTPException(status_code=400, detail="未检测到人脸，请重新拍照")
+        # Find user by exact name
+        name_stmt = select(User).where(User.name == user_name, User.is_active == True)
+        name_result = await db.execute(name_stmt)
+        user = name_result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=400, detail="用户未找到，请检查姓名是否正确")
+        if user.face_embedding is not None:
+            # 1:1 face verification — must match the claimed user
+            matched_id = match_face(embedding, [(user.id, user.face_embedding)])
+            if matched_id is None:
+                raise HTTPException(status_code=401, detail="人脸验证失败，不是本人")
+        user_id = user.id
+    elif req.face_image_base64 and req.face_image_base64.strip():
+        # Priority 2: face only → open-set matching (no name provided)
         embedding = extract_embedding_from_base64(req.face_image_base64)
         if embedding is not None:
             user_stmt = select(User.id, User.face_embedding).where(
@@ -76,17 +95,15 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
             user_result = await db.execute(user_stmt)
             candidates = [(row[0], row[1]) for row in user_result.fetchall()]
             user_id = match_face(embedding, candidates)
-
-    # Name-based matching (primary for QR scan, fallback for video)
-    if user_id is None and getattr(req, 'user_name', None) and req.user_name.strip():
-        name_stmt = select(User.id).where(
-            User.name == req.user_name.strip(),
-            User.is_active == True,
-        )
+    elif user_name:
+        # Priority 3: name only → exact name lookup
+        name_stmt = select(User.id).where(User.name == user_name, User.is_active == True)
         name_result = await db.execute(name_stmt)
         user_row = name_result.fetchone()
         if user_row:
             user_id = user_row[0]
+    else:
+        raise HTTPException(status_code=400, detail="请提供人脸照片或姓名")
 
     if user_id is None:
         raise HTTPException(status_code=400, detail="用户未找到，请检查姓名是否正确")
@@ -151,10 +168,27 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/out", response_model=CheckInResponse)
 async def check_out(req: CheckOutRequest, db: AsyncSession = Depends(get_db)):
-    # Determine user: by face OR by finding active check-in
+    # Determine user — name-verified face recognition (priority order)
     user_id = None
+    user_name = req.user_name.strip() if req.user_name else None
 
-    if req.face_image_base64:
+    if user_name and req.face_image_base64 and req.face_image_base64.strip():
+        # Priority 1: name + face → 1:1 verification (most secure)
+        embedding = extract_embedding_from_base64(req.face_image_base64)
+        if embedding is None:
+            raise HTTPException(status_code=400, detail="未检测到人脸，请重新拍照")
+        name_stmt = select(User).where(User.name == user_name, User.is_active == True)
+        name_result = await db.execute(name_stmt)
+        user = name_result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=400, detail="用户未找到，请检查姓名是否正确")
+        if user.face_embedding is not None:
+            matched_id = match_face(embedding, [(user.id, user.face_embedding)])
+            if matched_id is None:
+                raise HTTPException(status_code=401, detail="人脸验证失败，不是本人")
+        user_id = user.id
+    elif req.face_image_base64 and req.face_image_base64.strip():
+        # Priority 2: face only → open-set matching
         embedding = extract_embedding_from_base64(req.face_image_base64)
         if embedding is not None:
             user_stmt = select(User.id, User.face_embedding).where(
@@ -164,16 +198,16 @@ async def check_out(req: CheckOutRequest, db: AsyncSession = Depends(get_db)):
             user_result = await db.execute(user_stmt)
             candidates = [(row[0], row[1]) for row in user_result.fetchall()]
             user_id = match_face(embedding, candidates)
+    elif user_name:
+        # Priority 3: name only
+        name_stmt = select(User.id).where(User.name == user_name, User.is_active == True)
+        name_result = await db.execute(name_stmt)
+        user_row = name_result.fetchone()
+        if user_row:
+            user_id = user_row[0]
 
     if user_id is None:
-        # Try to find active check-in for manual sign-out
-        if req.token:
-            qr = await validate_qr_token(db, req.token)
-            if qr and qr.type == "checkout":
-                # With a valid checkout QR, we need face or we find any active check-in
-                # For now: require face or find all active
-                pass
-        raise HTTPException(status_code=400, detail="Face not recognized for check-out")
+        raise HTTPException(status_code=400, detail="签退失败，人脸未识别且未提供姓名")
 
     # Find active check-in
     active_stmt = select(CheckIn).where(

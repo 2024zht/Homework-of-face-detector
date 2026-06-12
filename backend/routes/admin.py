@@ -1,6 +1,7 @@
 """Admin management routes"""
 import base64
 import io
+import os
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -20,11 +21,11 @@ from utils.time_utils import beijing_now_naive
 from schemas import (
     UserCreate, UserResponse, LocationCreate, LocationResponse,
     CheckInRecord, StatisticsResponse, LocationValidateRequest,
-    AdminResetPasswordRequest,
+    AdminResetPasswordRequest, CorrectionRequest,
 )
 from services.face_service import (
     extract_embedding, embedding_to_bytes,
-    extract_embedding_from_base64,
+    extract_embedding_from_base64, update_embedding,
 )
 from services.location_service import is_within_range, reverse_geocode, haversine_distance
 from utils.security import decode_access_token
@@ -254,6 +255,11 @@ async def get_statistics(
             location_name=c.location_name,
             status=c.status,
             is_auto_checkout=c.is_auto_checkout,
+            check_in_photo=f"/static/{c.check_in_photo}" if c.check_in_photo else None,
+            check_out_photo=f"/static/{c.check_out_photo}" if c.check_out_photo else None,
+            original_user_id=c.original_user_id,
+            corrected_by=c.corrected_by,
+            corrected_at=c.corrected_at,
         ))
 
     return StatisticsResponse(
@@ -313,9 +319,75 @@ async def list_checkins(
             location_name=c.location_name,
             status=c.status,
             is_auto_checkout=c.is_auto_checkout,
+            check_in_photo=f"/static/{c.check_in_photo}" if c.check_in_photo else None,
+            check_out_photo=f"/static/{c.check_out_photo}" if c.check_out_photo else None,
+            original_user_id=c.original_user_id,
+            corrected_by=c.corrected_by,
+            corrected_at=c.corrected_at,
         )
         for c in checkins
     ]
+
+
+# ── Correction ────────────────────────────────────────────
+@router.post("/checkins/{checkin_id}/correct")
+async def correct_checkin(
+    checkin_id: int,
+    req: CorrectionRequest,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(get_current_admin),
+):
+    """Admin corrects a misidentified checkin: reassign user + self-learning."""
+    # 1. Load checkin record
+    stmt = select(CheckIn).options(selectinload(CheckIn.user)).where(CheckIn.id == checkin_id)
+    result = await db.execute(stmt)
+    checkin = result.scalar_one_or_none()
+    if checkin is None:
+        raise HTTPException(status_code=404, detail="Checkin record not found")
+
+    # 2. Load target (correct) user
+    user_stmt = select(User).where(User.id == req.correct_user_id, User.is_active == True)
+    user_result = await db.execute(user_stmt)
+    correct_user = user_result.scalar_one_or_none()
+    if correct_user is None:
+        raise HTTPException(status_code=404, detail="Target user not found")
+
+    # 3. Save original user if first correction
+    if checkin.original_user_id is None:
+        checkin.original_user_id = checkin.user_id
+
+    # 4. Reassign
+    admin_id = int(_admin["sub"])
+    checkin.user_id = req.correct_user_id
+    checkin.corrected_by = admin_id
+    checkin.corrected_at = beijing_now_naive()
+
+    # 5. Self-learning: extract embedding from stored photo, blend into correct user
+    if checkin.check_in_photo and correct_user.face_embedding is not None:
+        from config import PHOTO_DIR
+        photo_path = os.path.join(PHOTO_DIR, os.path.basename(checkin.check_in_photo))
+        if os.path.exists(photo_path):
+            with open(photo_path, "rb") as f:
+                photo_bytes = f.read()
+            new_emb = extract_embedding(photo_bytes)
+            if new_emb is not None:
+                correct_user.face_embedding = update_embedding(correct_user.face_embedding, new_emb)
+
+    await db.commit()
+    await db.refresh(checkin)
+
+    return {
+        "success": True,
+        "message": f"已将签到记录修正为 {correct_user.name}",
+        "record": {
+            "id": checkin.id,
+            "user_id": checkin.user_id,
+            "user_name": correct_user.name,
+            "original_user_id": checkin.original_user_id,
+            "corrected_by": checkin.corrected_by,
+            "corrected_at": checkin.corrected_at.isoformat() if checkin.corrected_at else None,
+        },
+    }
 
 
 # ── Location validation ──────────────────────────────────

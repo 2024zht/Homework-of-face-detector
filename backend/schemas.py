@@ -71,6 +71,7 @@ class CheckOutRequest(BaseModel):
     face_image_base64: Optional[str] = None
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    user_name: Optional[str] = None  # name for 1:1 face verification
 
 
 class CheckInResponse(BaseModel):
@@ -117,6 +118,11 @@ class CheckInRecord(BaseModel):
     location_name: Optional[str] = None
     status: str
     is_auto_checkout: bool
+    check_in_photo: Optional[str] = None
+    check_out_photo: Optional[str] = None
+    original_user_id: Optional[int] = None
+    corrected_by: Optional[int] = None
+    corrected_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -161,3 +167,9 @@ class ResetPasswordRequest(BaseModel):
 class AdminResetPasswordRequest(BaseModel):
     """Admin resets a user's password"""
     new_password: str = Field(default="123456", min_length=4, max_length=128)
+
+
+# ── Correction ────────────────────────────────────────────
+class CorrectionRequest(BaseModel):
+    """Admin reassigns a checkin record to the correct user"""
+    correct_user_id: int

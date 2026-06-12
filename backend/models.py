@@ -58,8 +58,12 @@ class CheckIn(Base):
     check_out_photo = Column(String(500), nullable=True)
     is_auto_checkout = Column(Boolean, default=False)
     status = Column(String(20), default="active")  # active, completed
+    # Correction tracking: admin can reassign misidentified checkins
+    original_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    corrected_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    corrected_at = Column(DateTime, nullable=True)
 
-    user = relationship("User", back_populates="checkins")
+    user = relationship("User", back_populates="checkins", foreign_keys=[user_id])
     location = relationship("Location")
 
 

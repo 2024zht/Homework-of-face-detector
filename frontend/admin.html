@@ -30,7 +30,7 @@
         <h3>最近签到记录</h3>
         <button class="btn btn-secondary" onclick="exportExcel()" style="padding:6px 14px;font-size:0.85rem">📥 导出Excel</button>
       </div>
-      <div class="table-wrap"><table id="recentTable"><thead><tr><th>姓名</th><th>角色</th><th>签到时间</th><th>签退时间</th><th>地点</th><th>状态</th></tr></thead><tbody></tbody></table></div>
+      <div class="table-wrap"><table id="recentTable"><thead><tr><th>照片</th><th>姓名</th><th>角色</th><th>签到时间</th><th>签退时间</th><th>地点</th><th>状态</th></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
 
@@ -101,7 +101,7 @@
         </select>
         <button class="btn btn-primary" onclick="exportExcel()" style="padding:8px 16px;font-size:0.85rem">📥 导出Excel</button>
       </div>
-      <div class="table-wrap"><table id="recordsTable"><thead><tr><th>姓名</th><th>签到</th><th>签退</th><th>地点</th><th>时长</th><th>方式</th></tr></thead><tbody></tbody></table></div>
+      <div class="table-wrap"><table id="recordsTable"><thead><tr><th>照片</th><th>姓名</th><th>签到</th><th>签退</th><th>地点</th><th>时长</th><th>方式</th><th>操作</th></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
 </div>
@@ -146,6 +146,58 @@
 const API = window.location.origin;
 let currentTab = 'dashboard';
 const TOKEN = localStorage.getItem('token');
+
+// ── Correction flow ────────────────────────────────────
+let _correctCheckinId = null;
+
+async function showCorrectModal(checkinId, currentUserName, currentUserId, photoPath) {
+  _correctCheckinId = checkinId;
+  document.getElementById('correctCurrentUser').textContent = currentUserName;
+  const photoDiv = document.getElementById('correctPhoto');
+  if (photoPath) {
+    photoDiv.innerHTML = `<img src="${API}${photoPath}" style="max-width:100%;max-height:200px;border-radius:8px" alt="签到照片">`;
+  } else {
+    photoDiv.innerHTML = '<p style="color:var(--ink-muted);font-size:0.85rem">无签到照片</p>';
+  }
+  const r = await api('/api/admin/users');
+  const users = await r.json();
+  const select = document.getElementById('correctUserSelect');
+  select.innerHTML = '<option value="">— 选择正确用户 —</option>' +
+    users.filter(u => u.id !== currentUserId).map(u => `<option value="${u.id}">${u.name} (${u.username})</option>`).join('');
+  document.getElementById('correctMsg').classList.add('hidden');
+  document.getElementById('correctModal').classList.remove('hidden');
+}
+
+async function doCorrection() {
+  const userId = document.getElementById('correctUserSelect').value;
+  if (!userId) return alert('请选择正确的用户');
+  const msg = document.getElementById('correctMsg');
+  msg.classList.remove('hidden');
+  msg.style.color = 'var(--ink-muted)';
+  msg.textContent = '处理中...';
+  try {
+    const r = await api(`/api/admin/checkins/${_correctCheckinId}/correct`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({correct_user_id: parseInt(userId)}),
+    });
+    const d = await r.json();
+    if (r.ok) {
+      msg.style.color = 'var(--success)';
+      msg.textContent = d.message;
+      setTimeout(() => {
+        document.getElementById('correctModal').classList.add('hidden');
+        loadRecords();
+      }, 1500);
+    } else {
+      msg.style.color = 'var(--danger)';
+      msg.textContent = d.detail || '修正失败';
+    }
+  } catch (e) {
+    msg.style.color = 'var(--danger)';
+    msg.textContent = '网络错误: ' + e.message;
+  }
+}
 const USER = JSON.parse(localStorage.getItem('user') || '{}');
 
 // Auth check
@@ -184,12 +236,16 @@ async function loadDashboard() {
   `;
 
   const tbody = document.querySelector('#recentTable tbody');
-  tbody.innerHTML = d.records.slice(0, 20).map(r => `
-    <tr><td>${r.user_name}</td><td>${r.role}</td><td>${new Date(r.check_in_time).toLocaleTimeString()}</td>
+  tbody.innerHTML = d.records.slice(0, 20).map(r => {
+    const photoHtml = r.check_in_photo
+      ? `<a href="${API}${r.check_in_photo}" target="_blank"><img src="${API}${r.check_in_photo}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;cursor:pointer" title="查看照片"></a>`
+      : '—';
+    const statusClass = r.status === 'active' ? 'success' : 'warning';
+    return `<tr><td>${photoHtml}</td><td>${r.user_name}</td><td>${r.role}</td><td>${new Date(r.check_in_time).toLocaleTimeString()}</td>
     <td>${r.check_out_time ? new Date(r.check_out_time).toLocaleTimeString() : '—'}</td>
     <td>${r.location_name || '—'}</td>
-    <td><span class="badge badge-${r.status === 'active' ? 'success' : 'warning'}">${r.status === 'active' ? '进行中' : '已完成'}</span></td></tr>
-  `).join('');
+    <td><span class="badge badge-${statusClass}">${r.status === 'active' ? '进行中' : '已完成'}</span></td></tr>`;
+  }).join('');
 }
 
 // QR
@@ -370,11 +426,25 @@ async function loadRecords() {
   const records = await r.json();
   document.querySelector('#recordsTable tbody').innerHTML = records.map(r => {
     const dur = r.check_out_time ? Math.round((new Date(r.check_out_time) - new Date(r.check_in_time)) / 60000) + ' min' : '—';
-    return `<tr><td>${r.user_name}</td>
-    <td>${new Date(r.check_in_time).toLocaleString()}</td>
-    <td>${r.check_out_time ? new Date(r.check_out_time).toLocaleString() : '—'}</td>
-    <td>${r.location_name || '—'}</td><td>${dur}</td>
-    <td>${r.is_auto_checkout ? '<span class="badge badge-warning">自动签退</span>' : r.status === 'active' ? '<span class="badge badge-success">进行中</span>' : '<span class="badge">手动签退</span>'}</td></tr>`;
+    const photoHtml = r.check_in_photo
+      ? `<a href="${API}${r.check_in_photo}" target="_blank"><img src="${API}${r.check_in_photo}" style="width:40px;height:40px;object-fit:cover;border-radius:4px;cursor:pointer" title="查看照片"></a>`
+      : '—';
+    const correctedBadge = r.corrected_at
+      ? ' <span class="badge badge-warning" style="font-size:0.7rem;padding:2px 6px">已修正</span>'
+      : '';
+    let methodBadge;
+    if (r.is_auto_checkout) methodBadge = '<span class="badge badge-warning">自动签退</span>';
+    else if (r.status === 'active') methodBadge = '<span class="badge badge-success">进行中</span>';
+    else methodBadge = '<span class="badge">手动签退</span>';
+    return `<tr>
+      <td>${photoHtml}</td>
+      <td>${r.user_name}${correctedBadge}</td>
+      <td>${new Date(r.check_in_time).toLocaleString()}</td>
+      <td>${r.check_out_time ? new Date(r.check_out_time).toLocaleString() : '—'}</td>
+      <td>${r.location_name || '—'}</td><td>${dur}</td>
+      <td>${methodBadge}</td>
+      <td><button class="btn btn-secondary" style="padding:4px 10px;font-size:0.75rem" onclick="showCorrectModal(${r.id}, '${r.user_name}', ${r.user_id}, '${r.check_in_photo || ''}')">修正</button></td>
+    </tr>`;
   }).join('');
 }
 
@@ -453,5 +523,28 @@ function logout() { localStorage.clear(); window.location.href = '/login.html'; 
 document.getElementById('recordDate').value = new Date().toISOString().split('T')[0];
 loadDashboard();
 </script>
+
+<!-- Correction modal -->
+<div class="modal-overlay hidden" id="correctModal">
+  <div class="modal" style="max-width:480px">
+    <h3>修正签到记录</h3>
+    <div id="correctContent">
+      <p style="font-size:0.9rem;margin-bottom:8px">当前用户: <b id="correctCurrentUser"></b></p>
+      <div id="correctPhoto" style="margin-bottom:12px;text-align:center"></div>
+      <div class="input-group">
+        <label>修正为</label>
+        <select class="input" id="correctUserSelect">
+          <option value="">— 选择正确用户 —</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="doCorrection()">确认修正</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('correctModal').classList.add('hidden')">取消</button>
+      </div>
+      <div id="correctMsg" class="text-center mt-2 hidden"></div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
