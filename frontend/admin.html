@@ -30,7 +30,7 @@
         <h3>最近签到记录</h3>
         <button class="btn btn-secondary" onclick="exportExcel()" style="padding:6px 14px;font-size:0.85rem">📥 导出Excel</button>
       </div>
-      <div class="table-wrap"><table id="recentTable"><thead><tr><th>照片</th><th>姓名</th><th>角色</th><th>签到时间</th><th>签退时间</th><th>地点</th><th>状态</th></tr></thead><tbody></tbody></table></div>
+      <div class="table-wrap"><table id="recentTable"><thead><tr><th>照片</th><th>姓名</th><th>角色</th><th>签到时间</th><th>签退时间</th><th>地点</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
 
@@ -244,7 +244,8 @@ async function loadDashboard() {
     return `<tr><td>${photoHtml}</td><td>${r.user_name}</td><td>${r.role}</td><td>${new Date(r.check_in_time).toLocaleTimeString()}</td>
     <td>${r.check_out_time ? new Date(r.check_out_time).toLocaleTimeString() : '—'}</td>
     <td>${r.location_name || '—'}</td>
-    <td><span class="badge badge-${statusClass}">${r.status === 'active' ? '进行中' : '已完成'}</span></td></tr>`;
+    <td><span class="badge badge-${statusClass}">${r.status === 'active' ? '进行中' : '已完成'}</span></td>
+    <td><button class="btn btn-secondary" style="padding:4px 10px;font-size:0.75rem" onclick="showCorrectModal(${r.id}, '${r.user_name}', ${r.user_id}, '${r.check_in_photo || ''}')">修正</button></td></tr>`;
   }).join('');
 }
 
