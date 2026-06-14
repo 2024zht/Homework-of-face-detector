@@ -324,10 +324,12 @@ async def batch_checkin_video(
         os.unlink(video_path)
         raise HTTPException(status_code=400, detail="No registered faces in database")
 
-    # 5. Process video
+    # 5. Process video (run sync in thread to avoid blocking event loop)
     try:
+        import asyncio
         from services.video_service import process_video
-        result = await process_video(
+        result = await asyncio.to_thread(
+            process_video,
             video_path=video_path,
             user_embeddings=candidates,
             location_id=qr.location_id,

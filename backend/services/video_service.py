@@ -48,7 +48,7 @@ def _embedding_to_jpeg_base64(face_img: np.ndarray) -> str:
     return base64.b64encode(buf).decode()
 
 
-async def process_video(
+def process_video(
     video_path: str,
     user_embeddings: List[Tuple[int, bytes]],  # [(user_id, embedding_bytes), ...]
     location_id: int,
