@@ -48,10 +48,13 @@
           </select>
         </div>
         <div class="mt-2" style="display:flex;gap:8px;align-items:center">
-          <button class="btn btn-primary" id="startSessionBtn" onclick="startSession()">&#x1f4e3; 发布签到任务</button>
-          <button class="btn btn-danger hidden" id="endSessionBtn" onclick="endSession()">&#x23f9; 结束签到</button>
+          <select class="input" id="sessionTargetUsers" multiple style="flex:1;min-height:36px;max-height:80px" title="目标签到用户（留空=所有人）">
+          </select>
+          <span style="font-size:0.75rem;color:var(--ink-muted)">留空=所有人</span>
         </div>
+        <button class="btn btn-primary mt-2" id="startSessionBtn" onclick="startSession()">&#x1f4e3; 发布签到任务</button>
       </div>
+      <div id="sessionList" class="mt-2"></div>
     </div>
 
     <div class="card mt-2">
@@ -549,7 +552,7 @@ async function uploadVideo() {
 }
 
 // ── Session Management ──────────────────────────────────
-var _activeSessionId = null;
+var _activeSessions = [];
 
 async function loadSessionStatus() {
   try {
@@ -557,41 +560,48 @@ async function loadSessionStatus() {
     var d = await r.json();
     var badge = document.getElementById('sessionBadge');
     var info = document.getElementById('sessionInfo');
-    var startBtn = document.getElementById('startSessionBtn');
-    var endBtn = document.getElementById('endSessionBtn');
     var formDiv = document.getElementById('sessionCreateForm');
+    var listDiv = document.getElementById('sessionList');
 
-    if (d.has_active_session && d.session) {
-      var s = d.session;
-      _activeSessionId = s.id;
-      if (s.time_valid) {
-        badge.textContent = '进行中';
-        badge.className = 'badge badge-success';
-      } else {
-        badge.textContent = '已发布(非签到时间)';
-        badge.className = 'badge badge-warning';
+    _activeSessions = d.sessions || [];
+
+    if (_activeSessions.length > 0) {
+      badge.textContent = _activeSessions.length + ' 个进行中';
+      badge.className = 'badge badge-success';
+      info.innerHTML = '';
+      formDiv.classList.add('hidden');
+
+      var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
+      var html = '';
+      for (var i = 0; i < _activeSessions.length; i++) {
+        var s = _activeSessions[i];
+        var parts = [];
+        parts.push('地点: <b>' + (s.location_name || '-') + '</b>');
+        parts.push('发布者: <b>' + (s.creator_name || '-') + '</b>');
+        if (s.start_date) parts.push(s.start_date + (s.end_date ? ' ~ ' + s.end_date : ''));
+        if (s.checkin_start_time) parts.push(s.checkin_start_time + '-' + s.checkin_end_time);
+        if (s.recurring_days) {
+          var days = s.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join(',');
+          parts.push(days);
+        }
+        if (s.target_user_ids) parts.push('目标: ' + s.target_user_ids.split(',').length + '人');
+
+        var statusCls = s.time_valid ? 'badge-success' : 'badge-warning';
+        var statusText = s.time_valid ? '进行中' : '非签到时间';
+
+        html += '<div class="card" style="padding:10px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">';
+        html += '<div><span class="badge ' + statusCls + '" style="font-size:0.7rem;margin-right:6px">' + statusText + '</span>' + parts.join(' | ') + '</div>';
+        html += '<button class="btn btn-danger" style="padding:4px 12px;font-size:0.8rem" onclick="endSession(' + s.id + ')">结束</button>';
+        html += '</div>';
       }
-      var parts = ['地点: <b>' + (s.location_name || '-') + '</b>'];
-      parts.push('发布者: <b>' + (s.creator_name || '-') + '</b>');
-      if (s.start_date) parts.push('日期: <b>' + s.start_date + (s.end_date ? ' ~ ' + s.end_date : '') + '</b>');
-      if (s.checkin_start_time) parts.push('时间: <b>' + s.checkin_start_time + ' - ' + s.checkin_end_time + '</b>');
-      if (s.recurring_days) {
-        var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
-        var days = s.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join(',');
-        parts.push('重复: <b>' + days + '</b>');
-      }
-      info.innerHTML = parts.join(' | ');
-      startBtn.classList.add('hidden');
-      endBtn.classList.remove('hidden');
-      formDiv.style.display = 'none';
+      listDiv.innerHTML = html;
     } else {
-      _activeSessionId = null;
+      _activeSessions = [];
       badge.textContent = '无活跃任务';
       badge.className = 'badge badge-warning';
       info.innerHTML = '';
-      startBtn.classList.remove('hidden');
-      endBtn.classList.add('hidden');
-      formDiv.style.display = 'block';
+      formDiv.classList.remove('hidden');
+      listDiv.innerHTML = '';
     }
   } catch(e) {}
 }
@@ -605,6 +615,16 @@ async function loadSessionLocationSelect() {
     for (var i = 0; i < locs.length; i++) {
       if (locs[i].is_active) {
         sel.innerHTML += '<option value="' + locs[i].id + '">' + locs[i].name + '</option>';
+      }
+    }
+    // Also load users for target selection
+    var ur = await api('/api/admin/users');
+    var users = await ur.json();
+    var usel = document.getElementById('sessionTargetUsers');
+    usel.innerHTML = '';
+    for (var j = 0; j < users.length; j++) {
+      if (users[j].is_active && users[j].role === 'student') {
+        usel.innerHTML += '<option value="' + users[j].id + '">' + users[j].name + '</option>';
       }
     }
   } catch(e) {}
@@ -629,6 +649,14 @@ async function startSession() {
   if (endTime) body.checkin_end_time = endTime;
   if (recurring) body.recurring_days = recurring;
 
+  // Target users
+  var tsel = document.getElementById('sessionTargetUsers');
+  var selected = [];
+  for (var i = 0; i < tsel.options.length; i++) {
+    if (tsel.options[i].selected) selected.push(tsel.options[i].value);
+  }
+  if (selected.length > 0) body.target_user_ids = selected.join(',');
+
   try {
     var r = await api('/api/admin/sessions', {
       method: 'POST',
@@ -647,13 +675,10 @@ async function startSession() {
   btn.disabled = false; btn.textContent = '📣 发布签到任务';
 }
 
-async function endSession() {
-  if (!confirm('确认结束当前签到任务？')) return;
-  if (!_activeSessionId) return;
-  var btn = document.getElementById('endSessionBtn');
-  btn.disabled = true; btn.textContent = '结束中...';
+async function endSession(sessionId) {
+  if (!confirm('确认结束该签到任务？')) return;
   try {
-    var r = await api('/api/admin/sessions/' + _activeSessionId + '/end', {method: 'POST'});
+    var r = await api('/api/admin/sessions/' + sessionId + '/end', {method: 'POST'});
     var d = await r.json();
     if (r.ok) {
       await loadSessionStatus();
@@ -663,7 +688,6 @@ async function endSession() {
   } catch(e) {
     alert('网络错误: ' + e.message);
   }
-  btn.disabled = false; btn.textContent = '⏹ 结束签到';
 }
 
 // Init

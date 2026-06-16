@@ -152,6 +152,7 @@ class SessionCreate(BaseModel):
     checkin_start_time: Optional[str] = None  # "08:00"
     checkin_end_time: Optional[str] = None    # "20:00"
     recurring_days: Optional[str] = None  # "0,1,2,3,4" Mon=0 Sun=6
+    target_user_ids: Optional[str] = None  # "1,3,5" comma-separated, null=all
 
 
 class SessionResponse(BaseModel):
@@ -168,6 +169,7 @@ class SessionResponse(BaseModel):
     checkin_start_time: Optional[str] = None
     checkin_end_time: Optional[str] = None
     recurring_days: Optional[str] = None
+    target_user_ids: Optional[str] = None
     time_valid: bool = True  # whether current time falls within session window
 
     class Config:
@@ -176,7 +178,7 @@ class SessionResponse(BaseModel):
 
 class ActiveSessionResponse(BaseModel):
     has_active_session: bool
-    session: Optional[SessionResponse] = None
+    sessions: list[SessionResponse] = []  # now supports multiple concurrent sessions
 
 
 # ── Password Reset ─────────────────────────────────────────

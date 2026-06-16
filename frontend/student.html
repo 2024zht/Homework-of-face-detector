@@ -91,14 +91,16 @@ async function api(url, opts) {
 
 // ── Load all data (status + session + history) ──────────
 async function loadAll() {
-  // Session status
+  // Session status - get all visible sessions
   var hasActiveSession = false;
-  var sessionData = null;
+  var sessions = [];
+  var anyTimeValid = false;
   try {
     var sR = await api('/api/check/session/active');
     var sD = await sR.json();
     hasActiveSession = sD.has_active_session;
-    sessionData = sD.session;
+    sessions = sD.sessions || [];
+    anyTimeValid = sessions.some(function(s){return s.time_valid;});
   } catch(e) {}
 
   // Check-in status
@@ -106,6 +108,7 @@ async function loadAll() {
   var d = await r.json();
 
   var optionsDiv = document.querySelector('.signin-options');
+  var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
 
   if (d.is_checked_in) {
     document.getElementById('statusIcon').innerHTML = '&#x2705;';
@@ -128,29 +131,38 @@ async function loadAll() {
     document.getElementById('signoutBtn').classList.add('hidden');
     optionsDiv.style.opacity = '0.4';
     optionsDiv.style.pointerEvents = 'none';
-  } else if (sessionData && !sessionData.time_valid) {
+  } else if (!anyTimeValid) {
     document.getElementById('statusIcon').innerHTML = '&#x1f552;';
     document.getElementById('statusTitle').textContent = '非签到时间段';
-    var detail = '地点: ' + (sessionData.location_name || '');
-    if (sessionData.checkin_start_time) detail += ' | 签到时间: ' + sessionData.checkin_start_time + ' - ' + sessionData.checkin_end_time;
-    if (sessionData.start_date) detail += ' | 日期: ' + sessionData.start_date + (sessionData.end_date ? ' ~ ' + sessionData.end_date : '');
-    if (sessionData.recurring_days) {
-      var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
-      var days = sessionData.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join(',');
-      detail += ' | 重复: ' + days;
+    var lines = [];
+    for (var i = 0; i < sessions.length; i++) {
+      var s = sessions[i];
+      var parts = [(s.location_name || '')];
+      if (s.checkin_start_time) parts.push(s.checkin_start_time + '-' + s.checkin_end_time);
+      if (s.start_date) parts.push(s.start_date + (s.end_date ? '~'+s.end_date : ''));
+      if (s.recurring_days) {
+        var days = s.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join(',');
+        parts.push(days);
+      }
+      lines.push(parts.join(' '));
     }
-    document.getElementById('statusDetail').textContent = detail;
-    document.getElementById('statusTime').textContent = '';
+    document.getElementById('statusDetail').textContent = lines.join(' | ');
+    document.getElementById('statusTime').textContent = '当前不在任何签到任务的时间段内';
     document.getElementById('signoutBtn').classList.add('hidden');
     optionsDiv.style.opacity = '0.4';
     optionsDiv.style.pointerEvents = 'none';
   } else {
     document.getElementById('statusIcon').innerHTML = '&#x1f4e3;';
-    document.getElementById('statusTitle').textContent = '签到任务进行中';
-    var detail = '地点: ' + (sessionData.location_name || '');
-    if (sessionData.creator_name) detail += ' | 发布者: ' + sessionData.creator_name;
-    if (sessionData.checkin_start_time) detail += ' | 时间: ' + sessionData.checkin_start_time + ' - ' + sessionData.checkin_end_time;
-    document.getElementById('statusDetail').textContent = detail;
+    document.getElementById('statusTitle').textContent = sessions.length + ' 个签到任务进行中';
+    var lines = [];
+    for (var j = 0; j < sessions.length; j++) {
+      var ss = sessions[j];
+      if (!ss.time_valid) continue;
+      var parts = [(ss.location_name || '')];
+      if (ss.checkin_start_time) parts.push(ss.checkin_start_time + '-' + ss.checkin_end_time);
+      lines.push(parts.join(' '));
+    }
+    document.getElementById('statusDetail').textContent = lines.join(' | ');
     document.getElementById('statusTime').textContent = '';
     document.getElementById('signoutBtn').classList.add('hidden');
     optionsDiv.style.opacity = '1';

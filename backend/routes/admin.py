@@ -659,6 +659,7 @@ def _session_to_response(session: CheckInSession) -> dict:
         "checkin_start_time": session.checkin_start_time.strftime("%H:%M") if session.checkin_start_time else None,
         "checkin_end_time": session.checkin_end_time.strftime("%H:%M") if session.checkin_end_time else None,
         "recurring_days": session.recurring_days,
+        "target_user_ids": session.target_user_ids,
         "time_valid": is_session_time_valid(session),
     }
 
@@ -669,12 +670,7 @@ async def create_session(
     db: AsyncSession = Depends(get_db),
     _admin=Depends(get_current_admin),
 ):
-    """Start a new check-in session. Only one active at a time."""
-    active_stmt = select(CheckInSession).where(CheckInSession.status == "active")
-    result = await db.execute(active_stmt)
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="已有一个进行中的签到任务，请先结束")
-
+    """Start a new check-in session. Multiple sessions can coexist."""
     loc_stmt = select(Location).where(Location.id == req.location_id, Location.is_active == True)
     loc_result = await db.execute(loc_stmt)
     location = loc_result.scalar_one_or_none()
@@ -690,6 +686,7 @@ async def create_session(
         checkin_start_time=_parse_time(req.checkin_start_time),
         checkin_end_time=_parse_time(req.checkin_end_time),
         recurring_days=req.recurring_days.strip() if req.recurring_days else None,
+        target_user_ids=req.target_user_ids.strip() if req.target_user_ids else None,
     )
     db.add(session)
     await db.commit()
@@ -727,11 +724,13 @@ async def get_active_session(
     db: AsyncSession = Depends(get_db),
     _admin=Depends(get_current_admin),
 ):
-    """Get the currently active check-in session (for admin dashboard)."""
+    """Get all active check-in sessions (for admin dashboard)."""
     stmt = (select(CheckInSession).where(CheckInSession.status == "active")
-            .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
+            .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator))
+            .order_by(CheckInSession.created_at.desc()))
     result = await db.execute(stmt)
-    session = result.scalar_one_or_none()
-    if session:
-        return {"has_active_session": True, "session": _session_to_response(session)}
-    return {"has_active_session": False, "session": None}
+    sessions = result.scalars().all()
+    return {
+        "has_active_session": len(sessions) > 0,
+        "sessions": [_session_to_response(s) for s in sessions],
+    }

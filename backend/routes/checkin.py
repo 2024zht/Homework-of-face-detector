@@ -37,12 +37,38 @@ async def _verify_location(lat: float, lng: float, location_id: int, db: AsyncSe
     return location, distance
 
 
-async def _get_active_session(db: AsyncSession) -> Optional[CheckInSession]:
-    """Return the currently active check-in session, or None."""
+async def _get_active_sessions(db: AsyncSession, user_id: int = None) -> list[CheckInSession]:
+    """Return all active sessions. If user_id given, filter by target_user_ids."""
+    stmt = (select(CheckInSession).where(CheckInSession.status == "active")
+            .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator))
+            .order_by(CheckInSession.created_at.desc()))
+    result = await db.execute(stmt)
+    sessions = result.scalars().all()
+    if user_id is not None:
+        sessions = [s for s in sessions if (
+            not s.target_user_ids or str(user_id) in s.target_user_ids.split(",")
+        )]
+    return sessions
+
+
+async def _get_any_valid_session(db: AsyncSession) -> Optional[CheckInSession]:
+    """Get any active+time_valid session (no user filter)."""
     stmt = (select(CheckInSession).where(CheckInSession.status == "active")
             .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
     result = await db.execute(stmt)
-    return result.scalar_one_or_none()
+    for s in result.scalars().all():
+        if is_session_time_valid(s):
+            return s
+    return None
+
+
+async def _get_best_session(db: AsyncSession, user_id: int) -> Optional[CheckInSession]:
+    """Get the first active+time_valid session matching this user."""
+    sessions = await _get_active_sessions(db, user_id=user_id)
+    for s in sessions:
+        if is_session_time_valid(s):
+            return s
+    return None
 
 
 @router.get("/session/active", response_model=ActiveSessionResponse)
@@ -50,7 +76,7 @@ async def get_active_session_for_student(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Check if there is an active check-in session (for student page)."""
+    """Get all active sessions visible to this student."""
     from utils.security import decode_access_token
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
@@ -59,24 +85,30 @@ async def get_active_session_for_student(
     if payload is None:
         raise HTTPException(status_code=401)
 
-    session = await _get_active_session(db)
-    if session:
-        return {"has_active_session": True, "session": _session_to_response(session)}
-    return {"has_active_session": False, "session": None}
+    user_id = int(payload["sub"])
+    sessions = await _get_active_sessions(db, user_id=user_id)
+    return {
+        "has_active_session": len(sessions) > 0,
+        "sessions": [_session_to_response(s) for s in sessions],
+    }
 
 
 @router.post("/in", response_model=CheckInResponse)
 async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
     # 1. Validate QR token (or allow camera-direct with active session)
+    # For target-user validation after identification
+    _matched_session = None
+
     if req.token == "camera-direct":
-        # Require an active check-in session published by teacher/admin
-        active_session = await _get_active_session(db)
-        if not active_session:
+        # Check if any active+time_valid session exists
+        _matched_session = await _get_any_valid_session(db)
+        if not _matched_session:
+            stmt = select(CheckInSession).where(CheckInSession.status == "active")
+            result = await db.execute(stmt)
+            if result.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail="不在签到时间段内")
             raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
-        if not is_session_time_valid(active_session):
-            raise HTTPException(status_code=400, detail="不在签到时间段内")
-        # Use the session's location
-        location = active_session.location
+        location = _matched_session.location
         if location is None:
             raise HTTPException(status_code=400, detail="签到任务地点不存在")
         if req.latitude and req.longitude:
@@ -92,12 +124,14 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
             raise HTTPException(status_code=400, detail="QR code expired or invalid")
         if qr.type != "checkin":
             raise HTTPException(status_code=400, detail="This QR code is for check-out, not check-in")
-        # Also verify an active session exists and time is valid
-        active_session = await _get_active_session(db)
-        if not active_session:
+        # Also verify an active session exists and time is valid (QR flow)
+        _matched_session = await _get_any_valid_session(db)
+        if not _matched_session:
+            stmt = select(CheckInSession).where(CheckInSession.status == "active")
+            result = await db.execute(stmt)
+            if result.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail="不在签到时间段内")
             raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
-        if not is_session_time_valid(active_session):
-            raise HTTPException(status_code=400, detail="不在签到时间段内")
         location, distance = await _verify_location(req.latitude, req.longitude, qr.location_id, db, req.source)
         location_name = await reverse_geocode(req.latitude, req.longitude)
         await mark_qr_used(db, req.token)
@@ -148,6 +182,12 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
 
     if user_id is None:
         raise HTTPException(status_code=400, detail="用户未找到，请检查姓名是否正确")
+
+    # 3.5 Verify user is targeted by the session (if session has target list)
+    if _matched_session and _matched_session.target_user_ids:
+        target_ids = [int(x) for x in _matched_session.target_user_ids.split(",") if x.strip()]
+        if user_id not in target_ids:
+            raise HTTPException(status_code=400, detail="您不在本次签到的目标用户中")
 
     # 4. Check if user already has an active check-in
     active_stmt = select(CheckIn).where(
@@ -336,11 +376,13 @@ async def batch_checkin_video(
         raise HTTPException(status_code=400, detail="This QR is for check-out, not check-in")
 
     # 1.5 Require active session with valid time window
-    active_session = await _get_active_session(db)
-    if not active_session:
+    _matched_session = await _get_any_valid_session(db)
+    if not _matched_session:
+        stmt = select(CheckInSession).where(CheckInSession.status == "active")
+        result = await db.execute(stmt)
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="不在签到时间段内")
         raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
-    if not is_session_time_valid(active_session):
-        raise HTTPException(status_code=400, detail="不在签到时间段内")
 
     # 2. Verify location
     if latitude and longitude:
