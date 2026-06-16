@@ -100,14 +100,25 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
     _matched_session = None
 
     if req.token == "camera-direct":
-        # Check if any active+time_valid session exists
-        _matched_session = await _get_any_valid_session(db)
-        if not _matched_session:
-            stmt = select(CheckInSession).where(CheckInSession.status == "active")
+        if req.session_id:
+            # Student picked a specific session
+            stmt = (select(CheckInSession).where(
+                CheckInSession.id == req.session_id, CheckInSession.status == "active")
+                    .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
             result = await db.execute(stmt)
-            if result.scalar_one_or_none():
-                raise HTTPException(status_code=400, detail="不在签到时间段内")
-            raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
+            _matched_session = result.scalar_one_or_none()
+            if not _matched_session:
+                raise HTTPException(status_code=400, detail="该签到任务已结束或不存在")
+            if not is_session_time_valid(_matched_session):
+                raise HTTPException(status_code=400, detail="不在该任务的签到时间段内")
+        else:
+            _matched_session = await _get_any_valid_session(db)
+            if not _matched_session:
+                stmt = select(CheckInSession).where(CheckInSession.status == "active")
+                result = await db.execute(stmt)
+                if result.scalar_one_or_none():
+                    raise HTTPException(status_code=400, detail="不在签到时间段内")
+                raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
         location = _matched_session.location
         if location is None:
             raise HTTPException(status_code=400, detail="签到任务地点不存在")

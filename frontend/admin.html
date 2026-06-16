@@ -31,30 +31,52 @@
         <h3>&#x1f4e3; 签到任务</h3>
         <span id="sessionBadge" class="badge badge-warning">无活跃任务</span>
       </div>
-      <div id="sessionInfo" style="font-size:0.88rem;color:var(--ink-secondary);margin-top:4px"></div>
-      <div id="sessionCreateForm">
-        <div class="mt-2" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <select class="input" id="sessionLocationSelect" style="width:auto;flex:1;min-width:120px"></select>
-          <input class="input" id="sessionStartDate" type="date" style="width:auto;max-width:130px" title="开始日期">
-          <input class="input" id="sessionEndDate" type="date" style="width:auto;max-width:130px" title="结束日期">
-          <input class="input" id="sessionStartTime" type="time" value="08:00" style="width:auto;max-width:110px" title="每日开始时间">
-          <input class="input" id="sessionEndTime" type="time" value="20:00" style="width:auto;max-width:110px" title="每日结束时间">
-          <select class="input" id="sessionRecurringDays" style="width:auto;max-width:130px" title="每周重复日">
-            <option value="">每天</option>
-            <option value="0,1,2,3,4">周一至周五</option>
-            <option value="5">每周六</option>
-            <option value="6">每周日</option>
-            <option value="5,6">周六日</option>
-          </select>
-        </div>
-        <div class="mt-2" style="display:flex;gap:8px;align-items:center">
-          <select class="input" id="sessionTargetUsers" multiple style="flex:1;min-height:36px;max-height:80px" title="目标签到用户（留空=所有人）">
-          </select>
-          <span style="font-size:0.75rem;color:var(--ink-muted)">留空=所有人</span>
-        </div>
-        <button class="btn btn-primary mt-2" id="startSessionBtn" onclick="startSession()">&#x1f4e3; 发布签到任务</button>
-      </div>
       <div id="sessionList" class="mt-2"></div>
+      <details id="sessionCreateForm" class="mt-2">
+        <summary style="cursor:pointer;font-weight:600;font-size:0.95rem;padding:4px 0">&#x2795; 新建签到任务</summary>
+        <div class="mt-2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="input-group">
+            <label>签到点</label>
+            <select class="input" id="sessionLocationSelect"></select>
+          </div>
+          <div class="input-group">
+            <label>重复规则</label>
+            <select class="input" id="sessionRecurringDays">
+              <option value="">每天</option>
+              <option value="0,1,2,3,4">周一至周五</option>
+              <option value="5">每周六</option>
+              <option value="6">每周日</option>
+              <option value="5,6">周六日</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>开始日期</label>
+            <input class="input" id="sessionStartDate" type="date">
+          </div>
+          <div class="input-group">
+            <label>结束日期</label>
+            <input class="input" id="sessionEndDate" type="date">
+          </div>
+          <div class="input-group">
+            <label>每日开始时间</label>
+            <input class="input" id="sessionStartTime" type="time" value="08:00">
+          </div>
+          <div class="input-group">
+            <label>每日结束时间</label>
+            <input class="input" id="sessionEndTime" type="time" value="20:00">
+          </div>
+        </div>
+        <details class="mt-2" id="targetUsersPanel">
+          <summary style="cursor:pointer;font-size:0.88rem;color:var(--ink-secondary)">&#x1f465; 选择签到用户 <span style="font-size:0.75rem">(留空=所有人)</span></summary>
+          <div class="mt-1" style="display:flex;gap:8px;margin-bottom:4px">
+            <a href="#" onclick="toggleAllUsers(true);return false" style="font-size:0.8rem">全选</a>
+            <a href="#" onclick="toggleAllUsers(false);return false" style="font-size:0.8rem">取消</a>
+            <span id="userCount" style="font-size:0.75rem;color:var(--ink-muted)"></span>
+          </div>
+          <div id="userCheckboxGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:2px 8px;max-height:180px;overflow-y:auto;padding:4px;border:1px solid var(--border);border-radius:4px;background:var(--surface)"></div>
+        </details>
+        <button class="btn btn-primary btn-block mt-2" id="startSessionBtn" onclick="startSession()">&#x1f4e3; 发布签到任务</button>
+      </details>
     </div>
 
     <div class="card mt-2">
@@ -553,14 +575,13 @@ async function uploadVideo() {
 
 // ── Session Management ──────────────────────────────────
 var _activeSessions = [];
+var _allUsers = [];
 
 async function loadSessionStatus() {
   try {
     var r = await api('/api/admin/sessions/active');
     var d = await r.json();
     var badge = document.getElementById('sessionBadge');
-    var info = document.getElementById('sessionInfo');
-    var formDiv = document.getElementById('sessionCreateForm');
     var listDiv = document.getElementById('sessionList');
 
     _activeSessions = d.sessions || [];
@@ -568,30 +589,30 @@ async function loadSessionStatus() {
     if (_activeSessions.length > 0) {
       badge.textContent = _activeSessions.length + ' 个进行中';
       badge.className = 'badge badge-success';
-      info.innerHTML = '';
-      formDiv.classList.add('hidden');
-
       var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
       var html = '';
       for (var i = 0; i < _activeSessions.length; i++) {
         var s = _activeSessions[i];
         var parts = [];
-        parts.push('地点: <b>' + (s.location_name || '-') + '</b>');
-        parts.push('发布者: <b>' + (s.creator_name || '-') + '</b>');
-        if (s.start_date) parts.push(s.start_date + (s.end_date ? ' ~ ' + s.end_date : ''));
+        parts.push('<b>' + (s.location_name || '-') + '</b>');
+        parts.push((s.creator_name || '-'));
+        if (s.start_date) parts.push(s.start_date + (s.end_date ? '~' + s.end_date : ''));
         if (s.checkin_start_time) parts.push(s.checkin_start_time + '-' + s.checkin_end_time);
         if (s.recurring_days) {
           var days = s.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join(',');
           parts.push(days);
         }
-        if (s.target_user_ids) parts.push('目标: ' + s.target_user_ids.split(',').length + '人');
-
-        var statusCls = s.time_valid ? 'badge-success' : 'badge-warning';
-        var statusText = s.time_valid ? '进行中' : '非签到时间';
-
-        html += '<div class="card" style="padding:10px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">';
-        html += '<div><span class="badge ' + statusCls + '" style="font-size:0.7rem;margin-right:6px">' + statusText + '</span>' + parts.join(' | ') + '</div>';
-        html += '<button class="btn btn-danger" style="padding:4px 12px;font-size:0.8rem" onclick="endSession(' + s.id + ')">结束</button>';
+        if (s.target_user_ids) {
+          var ids = s.target_user_ids.split(',');
+          parts.push('目标:' + ids.length + '人');
+        } else {
+          parts.push('所有人');
+        }
+        var cls = s.time_valid ? 'badge-success' : 'badge-warning';
+        var txt = s.time_valid ? '进行中' : '非签到时间';
+        html += '<div class="card" style="padding:8px 12px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;font-size:0.85rem">';
+        html += '<div><span class="badge ' + cls + '" style="font-size:0.65rem;margin-right:4px">' + txt + '</span>' + parts.join(' · ') + '</div>';
+        html += '<button class="btn btn-danger" style="padding:3px 10px;font-size:0.75rem" onclick="endSession(' + s.id + ')">&#x23f9; 结束</button>';
         html += '</div>';
       }
       listDiv.innerHTML = html;
@@ -599,14 +620,30 @@ async function loadSessionStatus() {
       _activeSessions = [];
       badge.textContent = '无活跃任务';
       badge.className = 'badge badge-warning';
-      info.innerHTML = '';
-      formDiv.classList.remove('hidden');
       listDiv.innerHTML = '';
     }
   } catch(e) {}
 }
 
-async function loadSessionLocationSelect() {
+function renderUserCheckboxes() {
+  var grid = document.getElementById('userCheckboxGrid');
+  var html = '';
+  for (var i = 0; i < _allUsers.length; i++) {
+    var u = _allUsers[i];
+    html += '<label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer;padding:1px 0;white-space:nowrap">';
+    html += '<input type="checkbox" value="' + u.id + '" class="targetUserCb" style="margin:0"> ' + u.name;
+    html += '</label>';
+  }
+  grid.innerHTML = html;
+  document.getElementById('userCount').textContent = _allUsers.length + ' 名学生';
+}
+
+function toggleAllUsers(on) {
+  var cbs = document.querySelectorAll('.targetUserCb');
+  for (var i = 0; i < cbs.length; i++) cbs[i].checked = on;
+}
+
+async function loadSessionInit() {
   try {
     var r = await api('/api/admin/locations');
     var locs = await r.json();
@@ -617,61 +654,44 @@ async function loadSessionLocationSelect() {
         sel.innerHTML += '<option value="' + locs[i].id + '">' + locs[i].name + '</option>';
       }
     }
-    // Also load users for target selection
     var ur = await api('/api/admin/users');
     var users = await ur.json();
-    var usel = document.getElementById('sessionTargetUsers');
-    usel.innerHTML = '';
+    _allUsers = [];
     for (var j = 0; j < users.length; j++) {
       if (users[j].is_active && users[j].role === 'student') {
-        usel.innerHTML += '<option value="' + users[j].id + '">' + users[j].name + '</option>';
+        _allUsers.push(users[j]);
       }
     }
+    renderUserCheckboxes();
   } catch(e) {}
 }
 
 async function startSession() {
-  var sel = document.getElementById('sessionLocationSelect');
-  var locId = parseInt(sel.value);
+  var locId = parseInt(document.getElementById('sessionLocationSelect').value);
   if (!locId) return alert('请选择签到点');
   var btn = document.getElementById('startSessionBtn');
   btn.disabled = true; btn.textContent = '发布中...';
 
   var body = {location_id: locId};
-  var startDate = document.getElementById('sessionStartDate').value;
-  var endDate = document.getElementById('sessionEndDate').value;
-  var startTime = document.getElementById('sessionStartTime').value;
-  var endTime = document.getElementById('sessionEndTime').value;
-  var recurring = document.getElementById('sessionRecurringDays').value;
-  if (startDate) body.start_date = startDate;
-  if (endDate) body.end_date = endDate;
-  if (startTime) body.checkin_start_time = startTime;
-  if (endTime) body.checkin_end_time = endTime;
-  if (recurring) body.recurring_days = recurring;
+  var v = document.getElementById('sessionStartDate').value; if (v) body.start_date = v;
+  v = document.getElementById('sessionEndDate').value; if (v) body.end_date = v;
+  v = document.getElementById('sessionStartTime').value; if (v) body.checkin_start_time = v;
+  v = document.getElementById('sessionEndTime').value; if (v) body.checkin_end_time = v;
+  v = document.getElementById('sessionRecurringDays').value; if (v) body.recurring_days = v;
 
-  // Target users
-  var tsel = document.getElementById('sessionTargetUsers');
-  var selected = [];
-  for (var i = 0; i < tsel.options.length; i++) {
-    if (tsel.options[i].selected) selected.push(tsel.options[i].value);
+  var cbs = document.querySelectorAll('.targetUserCb:checked');
+  if (cbs.length > 0) {
+    var ids = [];
+    for (var i = 0; i < cbs.length; i++) ids.push(cbs[i].value);
+    body.target_user_ids = ids.join(',');
   }
-  if (selected.length > 0) body.target_user_ids = selected.join(',');
 
   try {
-    var r = await api('/api/admin/sessions', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
-    });
+    var r = await api('/api/admin/sessions', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     var d = await r.json();
-    if (r.ok) {
-      await loadSessionStatus();
-    } else {
-      alert(d.detail || '发布失败');
-    }
-  } catch(e) {
-    alert('网络错误: ' + e.message);
-  }
+    if (r.ok) { await loadSessionStatus(); }
+    else { alert(d.detail || '发布失败'); }
+  } catch(e) { alert('网络错误: '+e.message); }
   btn.disabled = false; btn.textContent = '📣 发布签到任务';
 }
 
@@ -693,7 +713,7 @@ async function endSession(sessionId) {
 // Init
 function logout() { localStorage.clear(); window.location.href = '/login.html'; }
 document.getElementById('recordDate').value = new Date().toISOString().split('T')[0];
-loadSessionLocationSelect();
+loadSessionInit();
 loadSessionStatus();
 loadDashboard();
 </script>

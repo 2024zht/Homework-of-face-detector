@@ -64,6 +64,7 @@ class CheckInRequest(BaseModel):
     longitude: Optional[float] = None
     user_name: Optional[str] = None  # manual name input as fallback
     source: Optional[str] = None  # "amap"=GCJ-02, absent=WGS-84
+    session_id: Optional[int] = None  # which session to check in for
 
 
 class CheckOutRequest(BaseModel):

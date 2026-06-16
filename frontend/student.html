@@ -38,10 +38,11 @@
     <button class="btn btn-danger mt-2 hidden" id="signoutBtn" onclick="doSignOut()" style="margin:8px auto 0">&#x1f6aa; 签退</button>
   </div>
 
-  <!-- Options -->
-  <div class="card" style="padding:16px 20px">
-    <p style="font-size:.9rem;font-weight:600;margin-bottom:12px">选择签到方式</p>
-    <div class="signin-options">
+  <!-- Session list / Sign-in options -->
+  <div class="card" style="padding:16px 20px" id="signinCard">
+    <p style="font-size:.9rem;font-weight:600;margin-bottom:12px" id="signinCardTitle">签到任务</p>
+    <div id="sessionSigninList"></div>
+    <div class="signin-options hidden" id="signinOptionsFallback">
       <div class="signin-option" onclick="showQRCode()">
         <span class="icon">&#x1f4f1;</span><div class="title">扫码签到</div><div class="desc">手机扫描二维码签到</div>
       </div>
@@ -107,7 +108,9 @@ async function loadAll() {
   var r = await api('/api/check/status?user_id=' + USER.id);
   var d = await r.json();
 
-  var optionsDiv = document.querySelector('.signin-options');
+  var listDiv = document.getElementById('sessionSigninList');
+  var fallback = document.getElementById('signinOptionsFallback');
+  var cardTitle = document.getElementById('signinCardTitle');
   var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
 
   if (d.is_checked_in) {
@@ -121,52 +124,47 @@ async function loadAll() {
     soBtn.classList.remove('hidden');
     soBtn.disabled = false;
     soBtn.innerHTML = '&#x1f6aa; 签退';
-    optionsDiv.style.opacity = '1';
-    optionsDiv.style.pointerEvents = 'auto';
+    listDiv.innerHTML = '';
+    fallback.classList.add('hidden');
+    cardTitle.textContent = '签到任务';
   } else if (!hasActiveSession) {
     document.getElementById('statusIcon').innerHTML = '&#x23f3;';
     document.getElementById('statusTitle').textContent = '暂无签到任务';
     document.getElementById('statusDetail').textContent = '请等待教师发布签到任务';
     document.getElementById('statusTime').textContent = '';
     document.getElementById('signoutBtn').classList.add('hidden');
-    optionsDiv.style.opacity = '0.4';
-    optionsDiv.style.pointerEvents = 'none';
-  } else if (!anyTimeValid) {
-    document.getElementById('statusIcon').innerHTML = '&#x1f552;';
-    document.getElementById('statusTitle').textContent = '非签到时间段';
-    var lines = [];
+    listDiv.innerHTML = '<p style="color:var(--ink-muted);text-align:center;padding:12px">暂无签到任务</p>';
+    fallback.classList.add('hidden');
+    cardTitle.textContent = '签到任务';
+  } else {
+    document.getElementById('statusIcon').innerHTML = '&#x1f4e3;';
+    var validSessions = sessions.filter(function(s){return s.time_valid;});
+    document.getElementById('statusTitle').textContent = validSessions.length + ' 个签到任务可签到';
+    document.getElementById('statusDetail').textContent = '选择一个任务进行签到';
+    document.getElementById('statusTime').textContent = '';
+    document.getElementById('signoutBtn').classList.add('hidden');
+    fallback.classList.add('hidden');
+    cardTitle.textContent = '可签到的任务';
+
+    var html = '';
     for (var i = 0; i < sessions.length; i++) {
       var s = sessions[i];
-      var parts = [(s.location_name || '')];
+      var parts = [];
+      parts.push('<b>' + (s.location_name || '-') + '</b>');
       if (s.checkin_start_time) parts.push(s.checkin_start_time + '-' + s.checkin_end_time);
-      if (s.start_date) parts.push(s.start_date + (s.end_date ? '~'+s.end_date : ''));
+      if (s.start_date) parts.push((s.start_date||'') + (s.end_date?'~'+s.end_date:''));
       if (s.recurring_days) {
         var days = s.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join(',');
         parts.push(days);
       }
-      lines.push(parts.join(' '));
+      var disabled = s.time_valid ? '' : ' disabled';
+      var cls = s.time_valid ? 'btn-primary' : 'btn-secondary';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);gap:8px;font-size:0.85rem">';
+      html += '<div>' + parts.join(' · ') + '</div>';
+      html += '<button class="btn ' + cls + '" style="padding:4px 14px;font-size:0.8rem;flex-shrink:0" onclick="openCameraSignin(' + s.id + ')"' + disabled + '>' + (s.time_valid ? '&#x1f4f7; 签到' : '非签到时间') + '</button>';
+      html += '</div>';
     }
-    document.getElementById('statusDetail').textContent = lines.join(' | ');
-    document.getElementById('statusTime').textContent = '当前不在任何签到任务的时间段内';
-    document.getElementById('signoutBtn').classList.add('hidden');
-    optionsDiv.style.opacity = '0.4';
-    optionsDiv.style.pointerEvents = 'none';
-  } else {
-    document.getElementById('statusIcon').innerHTML = '&#x1f4e3;';
-    document.getElementById('statusTitle').textContent = sessions.length + ' 个签到任务进行中';
-    var lines = [];
-    for (var j = 0; j < sessions.length; j++) {
-      var ss = sessions[j];
-      if (!ss.time_valid) continue;
-      var parts = [(ss.location_name || '')];
-      if (ss.checkin_start_time) parts.push(ss.checkin_start_time + '-' + ss.checkin_end_time);
-      lines.push(parts.join(' '));
-    }
-    document.getElementById('statusDetail').textContent = lines.join(' | ');
-    document.getElementById('statusTime').textContent = '';
-    document.getElementById('signoutBtn').classList.add('hidden');
-    optionsDiv.style.opacity = '1';
-    optionsDiv.style.pointerEvents = 'auto';
+    listDiv.innerHTML = html;
   }
 
   // History
@@ -211,7 +209,10 @@ async function showQRCode() {
 }
 
 // ── Camera Face Sign-in ────────────────────────────────
-function openCameraSignin() {
+var _signinSessionId = null;
+
+function openCameraSignin(sessionId) {
+  _signinSessionId = sessionId || null;
   document.getElementById('modalTitle').textContent = '人脸识别签到';
   document.getElementById('modalBody').innerHTML = '<video id="camVideo" autoplay playsinline style="width:100%;border-radius:8px;max-height:300px"></video><canvas id="camCanvas" class="hidden"></canvas><button class="btn btn-primary btn-block mt-2" onclick="takeFacePhoto()" id="camBtn">&#x1f4f8; 拍照识别</button><div id="camResult" class="mt-2"></div>';
   document.getElementById('modalOverlay').classList.remove('hidden');
@@ -236,10 +237,13 @@ function takeFacePhoto() {
   btn.disabled = true; btn.textContent = '识别中...';
   result.innerHTML = '<div class="spinner" style="margin:8px auto"></div>';
 
+  var body = {token: 'camera-direct', face_image_base64: b64, latitude: null, longitude: null, user_name: USER.name};
+  if (_signinSessionId) body.session_id = _signinSessionId;
+
   fetch(API + '/api/check/in', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({token: 'camera-direct', face_image_base64: b64, latitude: null, longitude: null, user_name: USER.name}),
+    body: JSON.stringify(body),
   }).then(function(r) { return r.json(); }).then(function(d) {
     if (d.id) {
       closeModal();
