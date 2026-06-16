@@ -38,16 +38,19 @@
     <button class="btn btn-danger mt-2 hidden" id="signoutBtn" onclick="doSignOut()" style="margin:8px auto 0">&#x1f6aa; 签退</button>
   </div>
 
-  <!-- Session list / Sign-in options -->
-  <div class="card" style="padding:16px 20px" id="signinCard">
-    <p style="font-size:.9rem;font-weight:600;margin-bottom:12px" id="signinCardTitle">签到任务</p>
+  <!-- Session list + sign-in options -->
+  <div class="card" style="padding:20px" id="signinCard">
+    <p style="font-size:.9rem;font-weight:650;margin-bottom:14px" id="signinCardTitle">签到任务</p>
     <div id="sessionSigninList"></div>
-    <div class="signin-options hidden" id="signinOptionsFallback">
-      <div class="signin-option" onclick="showQRCode()">
-        <span class="icon">&#x1f4f1;</span><div class="title">扫码签到</div><div class="desc">手机扫描二维码签到</div>
-      </div>
-      <div class="signin-option" onclick="openCameraSignin()">
-        <span class="icon">&#x1f4f7;</span><div class="title">摄像头签到</div><div class="desc">人脸识别自动签到</div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+      <div onclick="showQRCode()" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:var(--radius-sm);cursor:pointer;background:var(--bg);transition:background .15s"
+           onmouseenter="this.style.background='var(--surface-hover)'" onmouseleave="this.style.background='var(--bg)'">
+        <span style="font-size:1.8rem">&#x1f4f1;</span>
+        <div>
+          <div style="font-weight:650;font-size:0.92rem">扫码签到</div>
+          <div style="font-size:0.78rem;color:var(--ink-muted)">用手机扫描二维码完成签到</div>
+        </div>
+        <span style="margin-left:auto;color:var(--ink-muted)">&#x203A;</span>
       </div>
     </div>
   </div>
@@ -109,7 +112,6 @@ async function loadAll() {
   var d = await r.json();
 
   var listDiv = document.getElementById('sessionSigninList');
-  var fallback = document.getElementById('signinOptionsFallback');
   var cardTitle = document.getElementById('signinCardTitle');
   var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
 
@@ -125,7 +127,6 @@ async function loadAll() {
     soBtn.disabled = false;
     soBtn.innerHTML = '&#x1f6aa; 签退';
     listDiv.innerHTML = '';
-    fallback.classList.add('hidden');
     cardTitle.textContent = '签到任务';
   } else if (!hasActiveSession) {
     document.getElementById('statusIcon').innerHTML = '&#x23f3;';
@@ -133,35 +134,32 @@ async function loadAll() {
     document.getElementById('statusDetail').textContent = '请等待教师发布签到任务';
     document.getElementById('statusTime').textContent = '';
     document.getElementById('signoutBtn').classList.add('hidden');
-    listDiv.innerHTML = '<p style="color:var(--ink-muted);text-align:center;padding:12px">暂无签到任务</p>';
-    fallback.classList.add('hidden');
+    listDiv.innerHTML = '<p style="color:var(--ink-muted);text-align:center;padding:16px 0;font-size:0.9rem">暂无签到任务</p>';
     cardTitle.textContent = '签到任务';
   } else {
-    document.getElementById('statusIcon').innerHTML = '&#x1f4e3;';
     var validSessions = sessions.filter(function(s){return s.time_valid;});
-    document.getElementById('statusTitle').textContent = validSessions.length + ' 个签到任务可签到';
-    document.getElementById('statusDetail').textContent = '选择一个任务进行签到';
+    document.getElementById('statusIcon').innerHTML = '&#x1f4e3;';
+    document.getElementById('statusTitle').textContent = (validSessions.length || sessions.length) + ' 个任务可签到';
+    document.getElementById('statusDetail').textContent = '';
     document.getElementById('statusTime').textContent = '';
     document.getElementById('signoutBtn').classList.add('hidden');
-    fallback.classList.add('hidden');
     cardTitle.textContent = '可签到的任务';
 
     var html = '';
     for (var i = 0; i < sessions.length; i++) {
       var s = sessions[i];
-      var parts = [];
-      parts.push('<b>' + (s.location_name || '-') + '</b>');
-      if (s.checkin_start_time) parts.push(s.checkin_start_time + '-' + s.checkin_end_time);
-      if (s.start_date) parts.push((s.start_date||'') + (s.end_date?'~'+s.end_date:''));
+      var metaParts = [];
+      metaParts.push('<b>' + (s.location_name || '-') + '</b>');
+      if (s.checkin_start_time) metaParts.push(s.checkin_start_time + '–' + s.checkin_end_time);
+      if (s.start_date) metaParts.push((s.start_date||'') + (s.end_date?' → '+s.end_date:''));
       if (s.recurring_days) {
-        var days = s.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join(',');
-        parts.push(days);
+        var days = s.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join('·');
+        metaParts.push(days);
       }
       var disabled = s.time_valid ? '' : ' disabled';
-      var cls = s.time_valid ? 'btn-primary' : 'btn-secondary';
-      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);gap:8px;font-size:0.85rem">';
-      html += '<div>' + parts.join(' · ') + '</div>';
-      html += '<button class="btn ' + cls + '" style="padding:4px 14px;font-size:0.8rem;flex-shrink:0" onclick="openCameraSignin(' + s.id + ')"' + disabled + '>' + (s.time_valid ? '&#x1f4f7; 签到' : '非签到时间') + '</button>';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);gap:12px;font-size:0.86rem">';
+      html += '<div>' + metaParts.join(' <span style="color:var(--ink-muted);font-size:0.7rem">·</span> ') + '</div>';
+      html += '<button class="btn ' + (s.time_valid ? 'btn-primary' : 'btn-secondary') + '" style="padding:6px 18px;font-size:0.82rem;flex-shrink:0" onclick="openCameraSignin(' + s.id + ')"' + disabled + '>' + (s.time_valid ? '签到' : '非签到时间') + '</button>';
       html += '</div>';
     }
     listDiv.innerHTML = html;

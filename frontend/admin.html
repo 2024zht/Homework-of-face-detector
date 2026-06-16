@@ -5,6 +5,59 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lab Check-in — Admin</title>
 <link rel="stylesheet" href="/frontend/css/app.css">
+<style>
+/* ── Session Management ─────────────────────────── */
+.session-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 768px) { .session-layout { grid-template-columns: 1fr; } }
+.session-create {
+  background: var(--surface); border-radius: var(--radius);
+  box-shadow: var(--shadow-sm); padding: 24px;
+}
+.session-create h4 { font-size: 1rem; font-weight: 650; margin-bottom: 16px; }
+.session-field { display: flex; flex-direction: column; gap: 4px; }
+.session-field label { font-size: 0.78rem; font-weight: 600; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.session-field input, .session-field select {
+  padding: 10px 12px; border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 0.92rem; font-family: var(--font); background: var(--surface);
+  transition: border-color 0.15s;
+}
+.session-field input:focus, .session-field select:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-subtle); }
+.session-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.user-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 3px; max-height: 200px; overflow-y: auto;
+  padding: 10px; border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.user-grid label {
+  display: flex; align-items: center; gap: 6px; padding: 5px 8px;
+  font-size: 0.83rem; cursor: pointer; border-radius: 6px;
+  transition: background 0.1s; white-space: nowrap;
+}
+.user-grid label:hover { background: var(--surface-hover); }
+.user-grid input[type="checkbox"] { accent-color: var(--brand); width: 15px; height: 15px; margin: 0; }
+.user-toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 6px; }
+.user-toolbar a { font-size: 0.8rem; color: var(--brand); text-decoration: none; font-weight: 600; cursor: pointer; }
+.user-toolbar a:hover { text-decoration: underline; }
+.user-toolbar span { font-size: 0.78rem; color: var(--ink-muted); }
+
+.session-list-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px; background: var(--surface); border-radius: var(--radius-sm);
+  border: 1px solid var(--border); margin-bottom: 8px;
+  gap: 12px; flex-wrap: wrap; transition: box-shadow 0.15s;
+}
+.session-list-item:hover { box-shadow: var(--shadow-sm); }
+.session-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 0.88rem; }
+.session-meta .sep { width: 4px; height: 4px; border-radius: 50%; background: var(--ink-muted); flex-shrink: 0; }
+.session-end-btn {
+  padding: 6px 16px; font-size: 0.82rem; font-weight: 600;
+  border-radius: var(--radius-sm); border: 1.5px solid var(--danger);
+  background: #fff; color: var(--danger); cursor: pointer;
+  transition: all 0.15s; flex-shrink: 0;
+}
+.session-end-btn:hover { background: var(--danger); color: #fff; }
+</style>
 </head>
 <body>
 <div class="topbar">
@@ -26,22 +79,17 @@
     <div class="stats-grid" id="statsGrid"></div>
 
     <!-- Session Management -->
-    <div class="card mt-2" id="sessionCard">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <h3>&#x1f4e3; 签到任务</h3>
-        <span id="sessionBadge" class="badge badge-warning">无活跃任务</span>
-      </div>
-      <div id="sessionList" class="mt-2"></div>
-      <details id="sessionCreateForm" class="mt-2">
-        <summary style="cursor:pointer;font-weight:600;font-size:0.95rem;padding:4px 0">&#x2795; 新建签到任务</summary>
-        <div class="mt-2" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div class="input-group">
+    <div class="session-layout mt-2">
+      <div class="session-create" id="sessionCreateForm">
+        <h4>&#x2795; 新建签到任务</h4>
+        <div class="session-form-grid">
+          <div class="session-field">
             <label>签到点</label>
-            <select class="input" id="sessionLocationSelect"></select>
+            <select id="sessionLocationSelect"></select>
           </div>
-          <div class="input-group">
+          <div class="session-field">
             <label>重复规则</label>
-            <select class="input" id="sessionRecurringDays">
+            <select id="sessionRecurringDays">
               <option value="">每天</option>
               <option value="0,1,2,3,4">周一至周五</option>
               <option value="5">每周六</option>
@@ -49,34 +97,42 @@
               <option value="5,6">周六日</option>
             </select>
           </div>
-          <div class="input-group">
+          <div class="session-field">
             <label>开始日期</label>
-            <input class="input" id="sessionStartDate" type="date">
+            <input type="date" id="sessionStartDate">
           </div>
-          <div class="input-group">
+          <div class="session-field">
             <label>结束日期</label>
-            <input class="input" id="sessionEndDate" type="date">
+            <input type="date" id="sessionEndDate">
           </div>
-          <div class="input-group">
-            <label>每日开始时间</label>
-            <input class="input" id="sessionStartTime" type="time" value="08:00">
+          <div class="session-field">
+            <label>开始时间</label>
+            <input type="time" id="sessionStartTime" value="08:00">
           </div>
-          <div class="input-group">
-            <label>每日结束时间</label>
-            <input class="input" id="sessionEndTime" type="time" value="20:00">
+          <div class="session-field">
+            <label>结束时间</label>
+            <input type="time" id="sessionEndTime" value="20:00">
           </div>
         </div>
-        <details class="mt-2" id="targetUsersPanel">
-          <summary style="cursor:pointer;font-size:0.88rem;color:var(--ink-secondary)">&#x1f465; 选择签到用户 <span style="font-size:0.75rem">(留空=所有人)</span></summary>
-          <div class="mt-1" style="display:flex;gap:8px;margin-bottom:4px">
-            <a href="#" onclick="toggleAllUsers(true);return false" style="font-size:0.8rem">全选</a>
-            <a href="#" onclick="toggleAllUsers(false);return false" style="font-size:0.8rem">取消</a>
-            <span id="userCount" style="font-size:0.75rem;color:var(--ink-muted)"></span>
+        <div class="session-field mt-2">
+          <label>&#x1f465; 签到人员</label>
+          <div class="user-toolbar">
+            <a href="#" onclick="toggleAllUsers(true);return false">全选</a>
+            <a href="#" onclick="toggleAllUsers(false);return false">取消全选</a>
+            <span id="userCount"></span>
           </div>
-          <div id="userCheckboxGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:2px 8px;max-height:180px;overflow-y:auto;padding:4px;border:1px solid var(--border);border-radius:4px;background:var(--surface)"></div>
-        </details>
+          <div class="user-grid" id="userCheckboxGrid"></div>
+        </div>
         <button class="btn btn-primary btn-block mt-2" id="startSessionBtn" onclick="startSession()">&#x1f4e3; 发布签到任务</button>
-      </details>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin:0">&#x1f4e3; 进行中的任务</h3>
+          <span id="sessionBadge" class="badge badge-warning">无</span>
+        </div>
+        <div id="sessionList"></div>
+      </div>
     </div>
 
     <div class="card mt-2">
@@ -587,40 +643,35 @@ async function loadSessionStatus() {
     _activeSessions = d.sessions || [];
 
     if (_activeSessions.length > 0) {
-      badge.textContent = _activeSessions.length + ' 个进行中';
+      badge.textContent = _activeSessions.length + ' 个';
       badge.className = 'badge badge-success';
       var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
       var html = '';
       for (var i = 0; i < _activeSessions.length; i++) {
         var s = _activeSessions[i];
-        var parts = [];
-        parts.push('<b>' + (s.location_name || '-') + '</b>');
-        parts.push((s.creator_name || '-'));
-        if (s.start_date) parts.push(s.start_date + (s.end_date ? '~' + s.end_date : ''));
-        if (s.checkin_start_time) parts.push(s.checkin_start_time + '-' + s.checkin_end_time);
-        if (s.recurring_days) {
-          var days = s.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join(',');
-          parts.push(days);
-        }
-        if (s.target_user_ids) {
-          var ids = s.target_user_ids.split(',');
-          parts.push('目标:' + ids.length + '人');
-        } else {
-          parts.push('所有人');
-        }
         var cls = s.time_valid ? 'badge-success' : 'badge-warning';
         var txt = s.time_valid ? '进行中' : '非签到时间';
-        html += '<div class="card" style="padding:8px 12px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;font-size:0.85rem">';
-        html += '<div><span class="badge ' + cls + '" style="font-size:0.65rem;margin-right:4px">' + txt + '</span>' + parts.join(' · ') + '</div>';
-        html += '<button class="btn btn-danger" style="padding:3px 10px;font-size:0.75rem" onclick="endSession(' + s.id + ')">&#x23f9; 结束</button>';
+        var meta = '';
+        meta += '<b>' + (s.location_name || '-') + '</b>';
+        if (s.checkin_start_time) meta += ' <span class="sep"></span> ' + s.checkin_start_time + '–' + s.checkin_end_time;
+        if (s.start_date) meta += ' <span class="sep"></span> ' + (s.start_date||'') + (s.end_date ? ' → ' + s.end_date : '');
+        if (s.recurring_days) {
+          var days = s.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join('·');
+          meta += ' <span class="sep"></span> ' + days;
+        }
+        var count = s.target_user_ids ? s.target_user_ids.split(',').length + '人' : '所有人';
+        meta += ' <span class="sep"></span> ' + count;
+        html += '<div class="session-list-item">';
+        html += '<div class="session-meta"><span class="badge ' + cls + '">' + txt + '</span>' + meta + '</div>';
+        html += '<button class="session-end-btn" onclick="endSession(' + s.id + ')">结束</button>';
         html += '</div>';
       }
       listDiv.innerHTML = html;
     } else {
       _activeSessions = [];
-      badge.textContent = '无活跃任务';
+      badge.textContent = '无';
       badge.className = 'badge badge-warning';
-      listDiv.innerHTML = '';
+      listDiv.innerHTML = '<p style="color:var(--ink-muted);font-size:0.88rem;padding:20px 0">暂无进行中的签到任务</p>';
     }
   } catch(e) {}
 }
