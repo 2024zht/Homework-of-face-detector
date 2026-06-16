@@ -128,12 +128,28 @@ async function loadAll() {
     document.getElementById('signoutBtn').classList.add('hidden');
     optionsDiv.style.opacity = '0.4';
     optionsDiv.style.pointerEvents = 'none';
+  } else if (sessionData && !sessionData.time_valid) {
+    document.getElementById('statusIcon').innerHTML = '&#x1f552;';
+    document.getElementById('statusTitle').textContent = '非签到时间段';
+    var detail = '地点: ' + (sessionData.location_name || '');
+    if (sessionData.checkin_start_time) detail += ' | 签到时间: ' + sessionData.checkin_start_time + ' - ' + sessionData.checkin_end_time;
+    if (sessionData.start_date) detail += ' | 日期: ' + sessionData.start_date + (sessionData.end_date ? ' ~ ' + sessionData.end_date : '');
+    if (sessionData.recurring_days) {
+      var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
+      var days = sessionData.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join(',');
+      detail += ' | 重复: ' + days;
+    }
+    document.getElementById('statusDetail').textContent = detail;
+    document.getElementById('statusTime').textContent = '';
+    document.getElementById('signoutBtn').classList.add('hidden');
+    optionsDiv.style.opacity = '0.4';
+    optionsDiv.style.pointerEvents = 'none';
   } else {
     document.getElementById('statusIcon').innerHTML = '&#x1f4e3;';
     document.getElementById('statusTitle').textContent = '签到任务进行中';
     var detail = '地点: ' + (sessionData.location_name || '');
     if (sessionData.creator_name) detail += ' | 发布者: ' + sessionData.creator_name;
-    if (sessionData.created_at) detail += ' | 开始: ' + new Date(sessionData.created_at).toLocaleTimeString();
+    if (sessionData.checkin_start_time) detail += ' | 时间: ' + sessionData.checkin_start_time + ' - ' + sessionData.checkin_end_time;
     document.getElementById('statusDetail').textContent = detail;
     document.getElementById('statusTime').textContent = '';
     document.getElementById('signoutBtn').classList.add('hidden');

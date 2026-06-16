@@ -607,6 +607,43 @@ async def export_checkins(
 
 
 # ── Check-In Sessions ─────────────────────────────────────
+from datetime import date, time
+
+WEEKDAY_MAP = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6}
+
+def _parse_date(s: Optional[str]) -> Optional[date]:
+    if not s: return None
+    return date.fromisoformat(s)
+
+def _parse_time(s: Optional[str]) -> Optional[time]:
+    if not s: return None
+    return time.fromisoformat(s)
+
+def is_session_time_valid(session: CheckInSession) -> bool:
+    """Check if current Beijing time falls within the session's time window."""
+    now = beijing_now_naive()
+    today = now.date()
+    now_t = now.time()
+
+    if session.start_date and today < session.start_date:
+        return False
+    if session.end_date and today > session.end_date:
+        return False
+
+    if session.recurring_days:
+        weekday = str(today.weekday())  # 0=Mon ... 6=Sun
+        valid_days = [d.strip() for d in session.recurring_days.split(",") if d.strip()]
+        if weekday not in valid_days:
+            return False
+
+    if session.checkin_start_time and now_t < session.checkin_start_time:
+        return False
+    if session.checkin_end_time and now_t > session.checkin_end_time:
+        return False
+
+    return True
+
+
 def _session_to_response(session: CheckInSession) -> dict:
     return {
         "id": session.id,
@@ -617,6 +654,12 @@ def _session_to_response(session: CheckInSession) -> dict:
         "status": session.status,
         "created_at": session.created_at,
         "ended_at": session.ended_at,
+        "start_date": session.start_date.isoformat() if session.start_date else None,
+        "end_date": session.end_date.isoformat() if session.end_date else None,
+        "checkin_start_time": session.checkin_start_time.strftime("%H:%M") if session.checkin_start_time else None,
+        "checkin_end_time": session.checkin_end_time.strftime("%H:%M") if session.checkin_end_time else None,
+        "recurring_days": session.recurring_days,
+        "time_valid": is_session_time_valid(session),
     }
 
 
@@ -627,13 +670,11 @@ async def create_session(
     _admin=Depends(get_current_admin),
 ):
     """Start a new check-in session. Only one active at a time."""
-    # Check no active session exists
     active_stmt = select(CheckInSession).where(CheckInSession.status == "active")
     result = await db.execute(active_stmt)
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="已有一个进行中的签到任务，请先结束")
 
-    # Verify location exists
     loc_stmt = select(Location).where(Location.id == req.location_id, Location.is_active == True)
     loc_result = await db.execute(loc_stmt)
     location = loc_result.scalar_one_or_none()
@@ -644,14 +685,18 @@ async def create_session(
         location_id=req.location_id,
         created_by=int(_admin["sub"]),
         status="active",
+        start_date=_parse_date(req.start_date),
+        end_date=_parse_date(req.end_date),
+        checkin_start_time=_parse_time(req.checkin_start_time),
+        checkin_end_time=_parse_time(req.checkin_end_time),
+        recurring_days=req.recurring_days.strip() if req.recurring_days else None,
     )
     db.add(session)
     await db.commit()
-    await db.refresh(session)
-    # Eager-load relationships for response
-    session = (await db.execute(
-        select(CheckInSession).where(CheckInSession.id == session.id)
-    )).scalar_one()
+    stmt = (select(CheckInSession).where(CheckInSession.id == session.id)
+            .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
+    result = await db.execute(stmt)
+    session = result.scalar_one()
     return _session_to_response(session)
 
 
@@ -662,7 +707,8 @@ async def end_session(
     _admin=Depends(get_current_admin),
 ):
     """End an active check-in session."""
-    stmt = select(CheckInSession).where(CheckInSession.id == session_id)
+    stmt = (select(CheckInSession).where(CheckInSession.id == session_id)
+            .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
     result = await db.execute(stmt)
     session = result.scalar_one_or_none()
     if not session:
@@ -673,11 +719,6 @@ async def end_session(
     session.status = "ended"
     session.ended_at = beijing_now_naive()
     await db.commit()
-    await db.refresh(session)
-    # Re-fetch with relationships
-    session = (await db.execute(
-        select(CheckInSession).where(CheckInSession.id == session_id)
-    )).scalar_one()
     return _session_to_response(session)
 
 
@@ -687,7 +728,8 @@ async def get_active_session(
     _admin=Depends(get_current_admin),
 ):
     """Get the currently active check-in session (for admin dashboard)."""
-    stmt = select(CheckInSession).where(CheckInSession.status == "active")
+    stmt = (select(CheckInSession).where(CheckInSession.status == "active")
+            .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
     result = await db.execute(stmt)
     session = result.scalar_one_or_none()
     if session:

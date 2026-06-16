@@ -147,6 +147,11 @@ class LocationValidateRequest(BaseModel):
 # ── Check-In Session ──────────────────────────────────────
 class SessionCreate(BaseModel):
     location_id: int
+    start_date: Optional[str] = None   # "2026-06-16"
+    end_date: Optional[str] = None     # "2026-06-20"
+    checkin_start_time: Optional[str] = None  # "08:00"
+    checkin_end_time: Optional[str] = None    # "20:00"
+    recurring_days: Optional[str] = None  # "0,1,2,3,4" Mon=0 Sun=6
 
 
 class SessionResponse(BaseModel):
@@ -158,6 +163,12 @@ class SessionResponse(BaseModel):
     status: str
     created_at: datetime
     ended_at: Optional[datetime] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    checkin_start_time: Optional[str] = None
+    checkin_end_time: Optional[str] = None
+    recurring_days: Optional[str] = None
+    time_valid: bool = True  # whether current time falls within session window
 
     class Config:
         from_attributes = True

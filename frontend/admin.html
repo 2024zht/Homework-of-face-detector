@@ -32,10 +32,25 @@
         <span id="sessionBadge" class="badge badge-warning">无活跃任务</span>
       </div>
       <div id="sessionInfo" style="font-size:0.88rem;color:var(--ink-secondary);margin-top:4px"></div>
-      <div class="mt-2" style="display:flex;gap:8px;align-items:center">
-        <select class="input" id="sessionLocationSelect" style="width:auto;flex:1"></select>
-        <button class="btn btn-primary" id="startSessionBtn" onclick="startSession()">&#x1f4e3; 发布签到任务</button>
-        <button class="btn btn-danger hidden" id="endSessionBtn" onclick="endSession()">&#x23f9; 结束签到</button>
+      <div id="sessionCreateForm">
+        <div class="mt-2" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select class="input" id="sessionLocationSelect" style="width:auto;flex:1;min-width:120px"></select>
+          <input class="input" id="sessionStartDate" type="date" style="width:auto;max-width:130px" title="开始日期">
+          <input class="input" id="sessionEndDate" type="date" style="width:auto;max-width:130px" title="结束日期">
+          <input class="input" id="sessionStartTime" type="time" value="08:00" style="width:auto;max-width:110px" title="每日开始时间">
+          <input class="input" id="sessionEndTime" type="time" value="20:00" style="width:auto;max-width:110px" title="每日结束时间">
+          <select class="input" id="sessionRecurringDays" style="width:auto;max-width:130px" title="每周重复日">
+            <option value="">每天</option>
+            <option value="0,1,2,3,4">周一至周五</option>
+            <option value="5">每周六</option>
+            <option value="6">每周日</option>
+            <option value="5,6">周六日</option>
+          </select>
+        </div>
+        <div class="mt-2" style="display:flex;gap:8px;align-items:center">
+          <button class="btn btn-primary" id="startSessionBtn" onclick="startSession()">&#x1f4e3; 发布签到任务</button>
+          <button class="btn btn-danger hidden" id="endSessionBtn" onclick="endSession()">&#x23f9; 结束签到</button>
+        </div>
       </div>
     </div>
 
@@ -544,15 +559,31 @@ async function loadSessionStatus() {
     var info = document.getElementById('sessionInfo');
     var startBtn = document.getElementById('startSessionBtn');
     var endBtn = document.getElementById('endSessionBtn');
+    var formDiv = document.getElementById('sessionCreateForm');
 
     if (d.has_active_session && d.session) {
-      _activeSessionId = d.session.id;
-      badge.textContent = '进行中';
-      badge.className = 'badge badge-success';
-      var startTime = new Date(d.session.created_at).toLocaleString();
-      info.innerHTML = '地点: <b>' + (d.session.location_name || '-') + '</b> | 发布者: <b>' + (d.session.creator_name || '-') + '</b> | 开始: <b>' + startTime + '</b>';
+      var s = d.session;
+      _activeSessionId = s.id;
+      if (s.time_valid) {
+        badge.textContent = '进行中';
+        badge.className = 'badge badge-success';
+      } else {
+        badge.textContent = '已发布(非签到时间)';
+        badge.className = 'badge badge-warning';
+      }
+      var parts = ['地点: <b>' + (s.location_name || '-') + '</b>'];
+      parts.push('发布者: <b>' + (s.creator_name || '-') + '</b>');
+      if (s.start_date) parts.push('日期: <b>' + s.start_date + (s.end_date ? ' ~ ' + s.end_date : '') + '</b>');
+      if (s.checkin_start_time) parts.push('时间: <b>' + s.checkin_start_time + ' - ' + s.checkin_end_time + '</b>');
+      if (s.recurring_days) {
+        var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
+        var days = s.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join(',');
+        parts.push('重复: <b>' + days + '</b>');
+      }
+      info.innerHTML = parts.join(' | ');
       startBtn.classList.add('hidden');
       endBtn.classList.remove('hidden');
+      formDiv.style.display = 'none';
     } else {
       _activeSessionId = null;
       badge.textContent = '无活跃任务';
@@ -560,6 +591,7 @@ async function loadSessionStatus() {
       info.innerHTML = '';
       startBtn.classList.remove('hidden');
       endBtn.classList.add('hidden');
+      formDiv.style.display = 'block';
     }
   } catch(e) {}
 }
@@ -584,11 +616,24 @@ async function startSession() {
   if (!locId) return alert('请选择签到点');
   var btn = document.getElementById('startSessionBtn');
   btn.disabled = true; btn.textContent = '发布中...';
+
+  var body = {location_id: locId};
+  var startDate = document.getElementById('sessionStartDate').value;
+  var endDate = document.getElementById('sessionEndDate').value;
+  var startTime = document.getElementById('sessionStartTime').value;
+  var endTime = document.getElementById('sessionEndTime').value;
+  var recurring = document.getElementById('sessionRecurringDays').value;
+  if (startDate) body.start_date = startDate;
+  if (endDate) body.end_date = endDate;
+  if (startTime) body.checkin_start_time = startTime;
+  if (endTime) body.checkin_end_time = endTime;
+  if (recurring) body.recurring_days = recurring;
+
   try {
     var r = await api('/api/admin/sessions', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({location_id: locId}),
+      body: JSON.stringify(body),
     });
     var d = await r.json();
     if (r.ok) {

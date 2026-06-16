@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models"""
 import uuid
 from datetime import datetime, timedelta
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Text, LargeBinary
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Date, Time, ForeignKey, Text, LargeBinary
 from sqlalchemy.orm import relationship
 from database import Base
 from utils.time_utils import beijing_now_naive
@@ -97,6 +97,12 @@ class CheckInSession(Base):
     status = Column(String(20), default="active")  # active, ended
     created_at = Column(DateTime, default=beijing_now_naive)
     ended_at = Column(DateTime, nullable=True)
+    # Time-window fields
+    start_date = Column(Date, nullable=True)          # valid from this date
+    end_date = Column(Date, nullable=True)            # valid until this date (inclusive)
+    checkin_start_time = Column(Time, nullable=True)  # daily start (e.g., 08:00)
+    checkin_end_time = Column(Time, nullable=True)    # daily end (e.g., 20:00)
+    recurring_days = Column(String(20), nullable=True)  # "5"=Sat, "0,1,2,3,4"=Mon-Fri, null=every day
 
     location = relationship("Location")
     creator = relationship("User", foreign_keys=[created_by])

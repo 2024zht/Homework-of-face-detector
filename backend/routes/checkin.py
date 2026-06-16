@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 
 from database import get_db
 from models import User, CheckIn, QRSession, Location, CheckInSession
@@ -14,6 +15,7 @@ from services.location_service import is_within_range, reverse_geocode
 from services.qr_service import validate_qr_token, mark_qr_used
 from config import AUTO_CHECKOUT_HOURS
 from utils.time_utils import beijing_now_naive
+from routes.admin import is_session_time_valid, _session_to_response
 
 router = APIRouter(prefix="/api/check", tags=["check"])
 
@@ -37,7 +39,8 @@ async def _verify_location(lat: float, lng: float, location_id: int, db: AsyncSe
 
 async def _get_active_session(db: AsyncSession) -> Optional[CheckInSession]:
     """Return the currently active check-in session, or None."""
-    stmt = select(CheckInSession).where(CheckInSession.status == "active")
+    stmt = (select(CheckInSession).where(CheckInSession.status == "active")
+            .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
@@ -58,19 +61,7 @@ async def get_active_session_for_student(
 
     session = await _get_active_session(db)
     if session:
-        return {
-            "has_active_session": True,
-            "session": {
-                "id": session.id,
-                "location_id": session.location_id,
-                "location_name": session.location.name if session.location else None,
-                "created_by": session.created_by,
-                "creator_name": session.creator.name if session.creator else None,
-                "status": session.status,
-                "created_at": session.created_at,
-                "ended_at": session.ended_at,
-            },
-        }
+        return {"has_active_session": True, "session": _session_to_response(session)}
     return {"has_active_session": False, "session": None}
 
 
@@ -82,6 +73,8 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
         active_session = await _get_active_session(db)
         if not active_session:
             raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
+        if not is_session_time_valid(active_session):
+            raise HTTPException(status_code=400, detail="不在签到时间段内")
         # Use the session's location
         location = active_session.location
         if location is None:
@@ -99,10 +92,12 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
             raise HTTPException(status_code=400, detail="QR code expired or invalid")
         if qr.type != "checkin":
             raise HTTPException(status_code=400, detail="This QR code is for check-out, not check-in")
-        # Also verify an active session exists
+        # Also verify an active session exists and time is valid
         active_session = await _get_active_session(db)
         if not active_session:
             raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
+        if not is_session_time_valid(active_session):
+            raise HTTPException(status_code=400, detail="不在签到时间段内")
         location, distance = await _verify_location(req.latitude, req.longitude, qr.location_id, db, req.source)
         location_name = await reverse_geocode(req.latitude, req.longitude)
         await mark_qr_used(db, req.token)
@@ -340,10 +335,12 @@ async def batch_checkin_video(
     if qr.type != "checkin":
         raise HTTPException(status_code=400, detail="This QR is for check-out, not check-in")
 
-    # 1.5 Require active session
+    # 1.5 Require active session with valid time window
     active_session = await _get_active_session(db)
     if not active_session:
         raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
+    if not is_session_time_valid(active_session):
+        raise HTTPException(status_code=400, detail="不在签到时间段内")
 
     # 2. Verify location
     if latitude and longitude:

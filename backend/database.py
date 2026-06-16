@@ -34,10 +34,11 @@ async def _migrate_checkin_correction_columns(conn):
 
 
 async def _migrate_checkin_sessions_table(conn):
-    """Add checkin_sessions table if missing (SQLite-safe)."""
+    """Add checkin_sessions table if missing, or add new columns (SQLite-safe)."""
     from sqlalchemy import text
     result = await conn.execute(text("PRAGMA table_info(checkin_sessions)"))
-    if not result.fetchall():
+    existing = [row[1] for row in result.fetchall()]
+    if not existing:
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS checkin_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,9 +46,22 @@ async def _migrate_checkin_sessions_table(conn):
                 created_by INTEGER NOT NULL REFERENCES users(id),
                 status VARCHAR(20) DEFAULT 'active',
                 created_at DATETIME,
-                ended_at DATETIME
+                ended_at DATETIME,
+                start_date DATE,
+                end_date DATE,
+                checkin_start_time TIME,
+                checkin_end_time TIME,
+                recurring_days VARCHAR(20)
             )
         """))
+    else:
+        for col, col_type in [
+            ("start_date", "DATE"), ("end_date", "DATE"),
+            ("checkin_start_time", "TIME"), ("checkin_end_time", "TIME"),
+            ("recurring_days", "VARCHAR(20)"),
+        ]:
+            if col not in existing:
+                await conn.execute(text(f"ALTER TABLE checkin_sessions ADD COLUMN {col} {col_type}"))
 
 
 async def init_db():
