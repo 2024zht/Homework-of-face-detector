@@ -318,7 +318,7 @@ async def batch_checkin_video(
     user_result = await db.execute(user_stmt)
     all_users = user_result.fetchall()
     user_map = {row[0]: row[1] for row in all_users}  # id -> name
-    candidates = [(row[0], row[1]) for row in all_users]
+    candidates = [(row[0], row[2]) for row in all_users]  # row[2] = face_embedding bytes
 
     if not candidates:
         os.unlink(video_path)
