@@ -327,7 +327,7 @@ function showTab(name, el) {
   document.querySelectorAll('.topbar-nav a').forEach(a => a.classList.remove('active'));
   if (el) el.classList.add('active');
   currentTab = name;
-  if (name === 'dashboard') loadDashboard();
+  if (name === 'dashboard') { loadDashboard(); loadSessionInit(); }
   if (name === 'qrcode') { loadLocationSelect(); loadVideoLocationSelect(); }
   if (name === 'users') loadUsers();
   if (name === 'locations') loadLocations();
