@@ -201,6 +201,22 @@ async def create_location(
     )
 
 
+@router.delete("/locations/{location_id}")
+async def delete_location(
+    location_id: int,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(get_current_admin),
+):
+    stmt = select(Location).where(Location.id == location_id)
+    result = await db.execute(stmt)
+    location = result.scalar_one_or_none()
+    if not location:
+        raise HTTPException(status_code=404, detail="签到点不存在")
+    location.is_active = False
+    await db.commit()
+    return {"ok": True}
+
+
 # ── Statistics ───────────────────────────────────────────
 @router.get("/statistics", response_model=StatisticsResponse)
 async def get_statistics(
