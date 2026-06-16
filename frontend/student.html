@@ -89,11 +89,24 @@ async function api(url, opts) {
   return r;
 }
 
-// ── Load all data (status + history) ───────────────────
+// ── Load all data (status + session + history) ──────────
 async function loadAll() {
-  // Status
+  // Session status
+  var hasActiveSession = false;
+  var sessionData = null;
+  try {
+    var sR = await api('/api/check/session/active');
+    var sD = await sR.json();
+    hasActiveSession = sD.has_active_session;
+    sessionData = sD.session;
+  } catch(e) {}
+
+  // Check-in status
   var r = await api('/api/check/status?user_id=' + USER.id);
   var d = await r.json();
+
+  var optionsDiv = document.querySelector('.signin-options');
+
   if (d.is_checked_in) {
     document.getElementById('statusIcon').innerHTML = '&#x2705;';
     document.getElementById('statusTitle').textContent = '已签到';
@@ -101,17 +114,31 @@ async function loadAll() {
     var t = '签到: ' + new Date(d.check_in_time).toLocaleString();
     if (d.auto_checkout_at) t += ' | 自动签退: ' + new Date(d.auto_checkout_at).toLocaleTimeString();
     document.getElementById('statusTime').textContent = t;
-    // Show sign-out button
     var soBtn = document.getElementById('signoutBtn');
     soBtn.classList.remove('hidden');
     soBtn.disabled = false;
     soBtn.innerHTML = '&#x1f6aa; 签退';
-  } else {
-    document.getElementById('statusIcon').innerHTML = '&#x274c;';
-    document.getElementById('statusTitle').textContent = '未签到';
-    document.getElementById('statusDetail').textContent = '请选择下方签到方式';
+    optionsDiv.style.opacity = '1';
+    optionsDiv.style.pointerEvents = 'auto';
+  } else if (!hasActiveSession) {
+    document.getElementById('statusIcon').innerHTML = '&#x23f3;';
+    document.getElementById('statusTitle').textContent = '暂无签到任务';
+    document.getElementById('statusDetail').textContent = '请等待教师发布签到任务';
     document.getElementById('statusTime').textContent = '';
     document.getElementById('signoutBtn').classList.add('hidden');
+    optionsDiv.style.opacity = '0.4';
+    optionsDiv.style.pointerEvents = 'none';
+  } else {
+    document.getElementById('statusIcon').innerHTML = '&#x1f4e3;';
+    document.getElementById('statusTitle').textContent = '签到任务进行中';
+    var detail = '地点: ' + (sessionData.location_name || '');
+    if (sessionData.creator_name) detail += ' | 发布者: ' + sessionData.creator_name;
+    if (sessionData.created_at) detail += ' | 开始: ' + new Date(sessionData.created_at).toLocaleTimeString();
+    document.getElementById('statusDetail').textContent = detail;
+    document.getElementById('statusTime').textContent = '';
+    document.getElementById('signoutBtn').classList.add('hidden');
+    optionsDiv.style.opacity = '1';
+    optionsDiv.style.pointerEvents = 'auto';
   }
 
   // History

@@ -144,6 +144,30 @@ class LocationValidateRequest(BaseModel):
     source: Optional[str] = None  # "amap"=GCJ-02
 
 
+# ── Check-In Session ──────────────────────────────────────
+class SessionCreate(BaseModel):
+    location_id: int
+
+
+class SessionResponse(BaseModel):
+    id: int
+    location_id: int
+    location_name: Optional[str] = None
+    created_by: int
+    creator_name: Optional[str] = None
+    status: str
+    created_at: datetime
+    ended_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ActiveSessionResponse(BaseModel):
+    has_active_session: bool
+    session: Optional[SessionResponse] = None
+
+
 # ── Password Reset ─────────────────────────────────────────
 class ForgotPasswordRequest(BaseModel):
     """Check if a user can reset password via face verification"""

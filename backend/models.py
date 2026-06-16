@@ -26,6 +26,7 @@ class User(Base):
 
     checkins = relationship("CheckIn", back_populates="user", foreign_keys="[CheckIn.user_id]")
     qr_sessions = relationship("QRSession", back_populates="generator")
+    checkin_sessions = relationship("CheckInSession", back_populates="creator", foreign_keys="CheckInSession.created_by")
 
 
 class Location(Base):
@@ -84,3 +85,18 @@ class QRSession(Base):
 
     def is_expired(self) -> bool:
         return beijing_now_naive() > self.expires_at
+
+
+class CheckInSession(Base):
+    """Teacher-published check-in window. Only one active at a time."""
+    __tablename__ = "checkin_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(String(20), default="active")  # active, ended
+    created_at = Column(DateTime, default=beijing_now_naive)
+    ended_at = Column(DateTime, nullable=True)
+
+    location = relationship("Location")
+    creator = relationship("User", foreign_keys=[created_by])

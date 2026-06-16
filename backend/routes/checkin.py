@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
 from database import get_db
-from models import User, CheckIn, QRSession, Location
-from schemas import CheckInRequest, CheckOutRequest, CheckInResponse, CheckStatusResponse
+from models import User, CheckIn, QRSession, Location, CheckInSession
+from schemas import CheckInRequest, CheckOutRequest, CheckInResponse, CheckStatusResponse, ActiveSessionResponse
 from services.face_service import extract_embedding_from_base64, match_face, save_checkin_photo, embedding_to_bytes
 from services.location_service import is_within_range, reverse_geocode
 from services.qr_service import validate_qr_token, mark_qr_used
@@ -35,15 +35,57 @@ async def _verify_location(lat: float, lng: float, location_id: int, db: AsyncSe
     return location, distance
 
 
+async def _get_active_session(db: AsyncSession) -> Optional[CheckInSession]:
+    """Return the currently active check-in session, or None."""
+    stmt = select(CheckInSession).where(CheckInSession.status == "active")
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+@router.get("/session/active", response_model=ActiveSessionResponse)
+async def get_active_session_for_student(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Check if there is an active check-in session (for student page)."""
+    from utils.security import decode_access_token
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401)
+    payload = decode_access_token(auth[7:])
+    if payload is None:
+        raise HTTPException(status_code=401)
+
+    session = await _get_active_session(db)
+    if session:
+        return {
+            "has_active_session": True,
+            "session": {
+                "id": session.id,
+                "location_id": session.location_id,
+                "location_name": session.location.name if session.location else None,
+                "created_by": session.created_by,
+                "creator_name": session.creator.name if session.creator else None,
+                "status": session.status,
+                "created_at": session.created_at,
+                "ended_at": session.ended_at,
+            },
+        }
+    return {"has_active_session": False, "session": None}
+
+
 @router.post("/in", response_model=CheckInResponse)
 async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
-    # 1. Validate QR token (or allow camera-direct)
+    # 1. Validate QR token (or allow camera-direct with active session)
     if req.token == "camera-direct":
-        loc_stmt = select(Location).where(Location.is_active == True).limit(1)
-        loc_result = await db.execute(loc_stmt)
-        location = loc_result.scalar_one_or_none()
+        # Require an active check-in session published by teacher/admin
+        active_session = await _get_active_session(db)
+        if not active_session:
+            raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
+        # Use the session's location
+        location = active_session.location
         if location is None:
-            raise HTTPException(status_code=400, detail="No active check-in location")
+            raise HTTPException(status_code=400, detail="签到任务地点不存在")
         if req.latitude and req.longitude:
             within, distance = is_within_range(req.latitude, req.longitude, location.latitude, location.longitude, location.radius_meters, req.source)
             if not within:
@@ -57,6 +99,10 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
             raise HTTPException(status_code=400, detail="QR code expired or invalid")
         if qr.type != "checkin":
             raise HTTPException(status_code=400, detail="This QR code is for check-out, not check-in")
+        # Also verify an active session exists
+        active_session = await _get_active_session(db)
+        if not active_session:
+            raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
         location, distance = await _verify_location(req.latitude, req.longitude, qr.location_id, db, req.source)
         location_name = await reverse_geocode(req.latitude, req.longitude)
         await mark_qr_used(db, req.token)
@@ -293,6 +339,11 @@ async def batch_checkin_video(
         raise HTTPException(status_code=400, detail="QR code expired or invalid")
     if qr.type != "checkin":
         raise HTTPException(status_code=400, detail="This QR is for check-out, not check-in")
+
+    # 1.5 Require active session
+    active_session = await _get_active_session(db)
+    if not active_session:
+        raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
 
     # 2. Verify location
     if latitude and longitude:

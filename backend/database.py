@@ -33,13 +33,31 @@ async def _migrate_checkin_correction_columns(conn):
         await conn.execute(text("ALTER TABLE checkins ADD COLUMN corrected_at DATETIME"))
 
 
+async def _migrate_checkin_sessions_table(conn):
+    """Add checkin_sessions table if missing (SQLite-safe)."""
+    from sqlalchemy import text
+    result = await conn.execute(text("PRAGMA table_info(checkin_sessions)"))
+    if not result.fetchall():
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS checkin_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                location_id INTEGER NOT NULL REFERENCES locations(id),
+                created_by INTEGER NOT NULL REFERENCES users(id),
+                status VARCHAR(20) DEFAULT 'active',
+                created_at DATETIME,
+                ended_at DATETIME
+            )
+        """))
+
+
 async def init_db():
     """Create all tables and seed default data."""
-    from models import User, Location, CheckIn, QRSession  # noqa
+    from models import User, Location, CheckIn, QRSession, CheckInSession  # noqa
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Run migration for new columns (idempotent)
+        # Run migrations for new columns/tables (idempotent)
         await _migrate_checkin_correction_columns(conn)
+        await _migrate_checkin_sessions_table(conn)
 
     async with async_session() as session:
         from models import User, Location

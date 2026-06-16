@@ -16,12 +16,13 @@ from openpyxl.utils import get_column_letter
 import bcrypt
 
 from database import get_db
-from models import User, CheckIn, Location
+from models import User, CheckIn, Location, CheckInSession
 from utils.time_utils import beijing_now_naive
 from schemas import (
     UserCreate, UserResponse, LocationCreate, LocationResponse,
     CheckInRecord, StatisticsResponse, LocationValidateRequest,
     AdminResetPasswordRequest, CorrectionRequest,
+    SessionCreate, SessionResponse, ActiveSessionResponse,
 )
 from services.face_service import (
     extract_embedding, embedding_to_bytes,
@@ -603,3 +604,92 @@ async def export_checkins(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+# ── Check-In Sessions ─────────────────────────────────────
+def _session_to_response(session: CheckInSession) -> dict:
+    return {
+        "id": session.id,
+        "location_id": session.location_id,
+        "location_name": session.location.name if session.location else None,
+        "created_by": session.created_by,
+        "creator_name": session.creator.name if session.creator else None,
+        "status": session.status,
+        "created_at": session.created_at,
+        "ended_at": session.ended_at,
+    }
+
+
+@router.post("/sessions", response_model=SessionResponse)
+async def create_session(
+    req: SessionCreate,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(get_current_admin),
+):
+    """Start a new check-in session. Only one active at a time."""
+    # Check no active session exists
+    active_stmt = select(CheckInSession).where(CheckInSession.status == "active")
+    result = await db.execute(active_stmt)
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="已有一个进行中的签到任务，请先结束")
+
+    # Verify location exists
+    loc_stmt = select(Location).where(Location.id == req.location_id, Location.is_active == True)
+    loc_result = await db.execute(loc_stmt)
+    location = loc_result.scalar_one_or_none()
+    if not location:
+        raise HTTPException(status_code=404, detail="签到点不存在或已停用")
+
+    session = CheckInSession(
+        location_id=req.location_id,
+        created_by=int(_admin["sub"]),
+        status="active",
+    )
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    # Eager-load relationships for response
+    session = (await db.execute(
+        select(CheckInSession).where(CheckInSession.id == session.id)
+    )).scalar_one()
+    return _session_to_response(session)
+
+
+@router.post("/sessions/{session_id}/end", response_model=SessionResponse)
+async def end_session(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(get_current_admin),
+):
+    """End an active check-in session."""
+    stmt = select(CheckInSession).where(CheckInSession.id == session_id)
+    result = await db.execute(stmt)
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="签到任务不存在")
+    if session.status != "active":
+        raise HTTPException(status_code=400, detail="该签到任务已结束")
+
+    session.status = "ended"
+    session.ended_at = beijing_now_naive()
+    await db.commit()
+    await db.refresh(session)
+    # Re-fetch with relationships
+    session = (await db.execute(
+        select(CheckInSession).where(CheckInSession.id == session_id)
+    )).scalar_one()
+    return _session_to_response(session)
+
+
+@router.get("/sessions/active", response_model=ActiveSessionResponse)
+async def get_active_session(
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(get_current_admin),
+):
+    """Get the currently active check-in session (for admin dashboard)."""
+    stmt = select(CheckInSession).where(CheckInSession.status == "active")
+    result = await db.execute(stmt)
+    session = result.scalar_one_or_none()
+    if session:
+        return {"has_active_session": True, "session": _session_to_response(session)}
+    return {"has_active_session": False, "session": None}

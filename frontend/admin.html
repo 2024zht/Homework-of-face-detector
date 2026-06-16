@@ -25,6 +25,20 @@
     <h2 class="mb-2">&#x1f4ca; 今日概览</h2>
     <div class="stats-grid" id="statsGrid"></div>
 
+    <!-- Session Management -->
+    <div class="card mt-2" id="sessionCard">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3>&#x1f4e3; 签到任务</h3>
+        <span id="sessionBadge" class="badge badge-warning">无活跃任务</span>
+      </div>
+      <div id="sessionInfo" style="font-size:0.88rem;color:var(--ink-secondary);margin-top:4px"></div>
+      <div class="mt-2" style="display:flex;gap:8px;align-items:center">
+        <select class="input" id="sessionLocationSelect" style="width:auto;flex:1"></select>
+        <button class="btn btn-primary" id="startSessionBtn" onclick="startSession()">&#x1f4e3; 发布签到任务</button>
+        <button class="btn btn-danger hidden" id="endSessionBtn" onclick="endSession()">&#x23f9; 结束签到</button>
+      </div>
+    </div>
+
     <div class="card mt-2">
       <div style="display:flex;justify-content:space-between;align-items:center" class="mb-2">
         <h3>最近签到记录</h3>
@@ -519,9 +533,99 @@ async function uploadVideo() {
   }
 }
 
+// ── Session Management ──────────────────────────────────
+var _activeSessionId = null;
+
+async function loadSessionStatus() {
+  try {
+    var r = await api('/api/admin/sessions/active');
+    var d = await r.json();
+    var badge = document.getElementById('sessionBadge');
+    var info = document.getElementById('sessionInfo');
+    var startBtn = document.getElementById('startSessionBtn');
+    var endBtn = document.getElementById('endSessionBtn');
+
+    if (d.has_active_session && d.session) {
+      _activeSessionId = d.session.id;
+      badge.textContent = '进行中';
+      badge.className = 'badge badge-success';
+      var startTime = new Date(d.session.created_at).toLocaleString();
+      info.innerHTML = '地点: <b>' + (d.session.location_name || '-') + '</b> | 发布者: <b>' + (d.session.creator_name || '-') + '</b> | 开始: <b>' + startTime + '</b>';
+      startBtn.classList.add('hidden');
+      endBtn.classList.remove('hidden');
+    } else {
+      _activeSessionId = null;
+      badge.textContent = '无活跃任务';
+      badge.className = 'badge badge-warning';
+      info.innerHTML = '';
+      startBtn.classList.remove('hidden');
+      endBtn.classList.add('hidden');
+    }
+  } catch(e) {}
+}
+
+async function loadSessionLocationSelect() {
+  try {
+    var r = await api('/api/admin/locations');
+    var locs = await r.json();
+    var sel = document.getElementById('sessionLocationSelect');
+    sel.innerHTML = '';
+    for (var i = 0; i < locs.length; i++) {
+      if (locs[i].is_active) {
+        sel.innerHTML += '<option value="' + locs[i].id + '">' + locs[i].name + '</option>';
+      }
+    }
+  } catch(e) {}
+}
+
+async function startSession() {
+  var sel = document.getElementById('sessionLocationSelect');
+  var locId = parseInt(sel.value);
+  if (!locId) return alert('请选择签到点');
+  var btn = document.getElementById('startSessionBtn');
+  btn.disabled = true; btn.textContent = '发布中...';
+  try {
+    var r = await api('/api/admin/sessions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({location_id: locId}),
+    });
+    var d = await r.json();
+    if (r.ok) {
+      await loadSessionStatus();
+    } else {
+      alert(d.detail || '发布失败');
+    }
+  } catch(e) {
+    alert('网络错误: ' + e.message);
+  }
+  btn.disabled = false; btn.textContent = '📣 发布签到任务';
+}
+
+async function endSession() {
+  if (!confirm('确认结束当前签到任务？')) return;
+  if (!_activeSessionId) return;
+  var btn = document.getElementById('endSessionBtn');
+  btn.disabled = true; btn.textContent = '结束中...';
+  try {
+    var r = await api('/api/admin/sessions/' + _activeSessionId + '/end', {method: 'POST'});
+    var d = await r.json();
+    if (r.ok) {
+      await loadSessionStatus();
+    } else {
+      alert(d.detail || '结束失败');
+    }
+  } catch(e) {
+    alert('网络错误: ' + e.message);
+  }
+  btn.disabled = false; btn.textContent = '⏹ 结束签到';
+}
+
 // Init
 function logout() { localStorage.clear(); window.location.href = '/login.html'; }
 document.getElementById('recordDate').value = new Date().toISOString().split('T')[0];
+loadSessionLocationSelect();
+loadSessionStatus();
 loadDashboard();
 </script>
 
