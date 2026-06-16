@@ -1,16 +1,22 @@
-# 人脸识别签到签退系统 v1.0
+# 人脸识别签到签退系统 v3.0
 
-基于 InsightFace 的实验室人脸识别签到签退系统。支持 QR 码扫码签到、高德地图定位校验、视频批量签到、三级角色管理、超时自动签退。
+基于 InsightFace 的实验室人脸识别签到签退系统。支持点名任务发布、时间段/周期控制、QR 码扫码签到、高德地图定位校验、视频批量签到、三级角色管理、超时自动签退。
 
 ## 功能特性
 
+- **点名任务 (Session)** — 教师/管理员发布签到任务，指定签到点、时间段、日期范围、周期规则、目标学生
+- **时间段/周期控制** — 日期范围 + 每日时间段 + 每周重复（周一至周五/每周六等）
+- **多任务并行** — 支持同时多个签到任务，学生可选择特定任务签到
+- **用户精准指定** — 勾选目标学生，未指定者无法签到
 - **QR 码签到/签退** — 管理员生成二维码，学生手机扫码完成签到/签退
 - **高德定位校验** — 手机 GPS + 基站 + Wi-Fi 融合定位，强制 100m 范围内签到
 - **人脸识别** — InsightFace SCRFD-10GF 检测 + ResNet50@WebFace600K 识别，GPU 加速
 - **视频批量签到** — 上传视频自动检测所有人脸，去重后批量签到
 - **自动签退** — 超时（默认 4 小时）自动签退，无需手动操作
 - **三级角色** — 管理员 / 实验室指导教师 / 学生，不同权限
-- **统计报表** — 签到率、平均时长、签到记录查询
+- **统计报表 + Excel 导出** — 签到率、平均时长、签到记录查询，一键导出
+- **人脸找回密码** — 通过人脸验证重置密码
+- **签到更正 + 自我学习** — 管理员可修正识别错误，模型持续优化
 - **cpolar 穿透** — 一键生成 HTTPS 公网 URL，手机远程访问
 - **现代化 UI** — impeccable 设计系统，移动端优先，桌面端管理后台
 
@@ -170,24 +176,26 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8080
 ├── backend/
 │   ├── main.py              # FastAPI 入口 + 自动签退后台任务
 │   ├── config.py            # 配置（从环境变量读取密钥）
-│   ├── database.py          # 数据库初始化 + 默认数据种子
-│   ├── models.py            # ORM 模型 (User, Location, CheckIn, QRSession)
+│   ├── database.py          # 数据库初始化 + 默认数据种子 + 增量迁移
+│   ├── models.py            # ORM 模型 (User, Location, CheckIn, QRSession, CheckInSession)
 │   ├── schemas.py           # Pydantic 请求/响应模型
 │   ├── routes/
-│   │   ├── auth.py          # 登录/注册 (bcrypt + JWT)
+│   │   ├── auth.py          # 登录/注册/忘记密码/人脸重置密码
 │   │   ├── qrcode.py        # QR 码生成/验证
-│   │   ├── checkin.py       # 签到/签退/视频批量签到
-│   │   └── admin.py         # 用户管理/签到点/统计
+│   │   ├── checkin.py       # 签到/签退/视频批量/任务查询
+│   │   └── admin.py         # 用户管理/签到点/统计/导出/更正/任务管理
 │   ├── services/
-│   │   ├── face_service.py       # InsightFace 人脸检测+识别
+│   │   ├── face_service.py       # InsightFace 人脸检测+识别+自我学习
 │   │   ├── location_service.py   # Haversine 距离 + 高德逆地理编码
 │   │   ├── qr_service.py         # QR 码生成
 │   │   └── video_service.py      # 视频帧提取+人脸去重+批量匹配
 │   └── utils/
-│       └── security.py      # JWT 令牌工具
+│       ├── security.py      # JWT 令牌工具
+│       └── time_utils.py    # 北京时间辅助函数
 ├── frontend/
 │   ├── index.html           # 学生扫码签到页 (mobile-first)
 │   ├── admin.html           # 管理后台 (仪表盘/QR/人员/签到点/记录)
+│   ├── student.html         # 学生面板 (任务列表+签到方式选择)
 │   ├── login.html           # 登录页
 │   └── css/app.css          # impeccable 设计系统
 ├── static/                  # QR 码图片 + 签到照片 (运行时生成)
@@ -218,10 +226,11 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8080
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/check/in` | 人脸签到（需 QR token + 定位 + 人脸照片） |
+| POST | `/api/check/in` | 人脸签到（支持 session_id 指定任务） |
 | POST | `/api/check/out` | 人脸签退 |
 | POST | `/api/check/batch-video` | 上传视频批量人脸签到 |
 | GET | `/api/check/status?user_id=` | 查询用户当前签到状态 |
+| GET | `/api/check/session/active` | 获取当前可签到任务列表 |
 
 ### 管理
 
@@ -231,11 +240,18 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8080
 | POST | `/api/admin/users` | 添加用户 |
 | POST | `/api/admin/users/{id}/face` | 注册用户人脸 |
 | POST | `/api/admin/users/{id}/deactivate` | 禁用用户 |
+| POST | `/api/admin/users/{id}/reset-password` | 重置用户密码 |
 | GET | `/api/admin/locations` | 签到点列表 |
 | POST | `/api/admin/locations` | 添加签到点 |
+| DELETE | `/api/admin/locations/{id}` | 删除签到点 |
 | GET | `/api/admin/statistics?date=` | 每日统计报表 |
 | GET | `/api/admin/checkins?date=&user_id=` | 签到记录查询 |
-| POST | `/api/admin/validate-location` | 验证位置是否在范围内 |
+| POST | `/api/admin/checkins/{id}/correct` | 更正签到记录 |
+| POST | `/api/admin/validate-location` | 验证位置 |
+| GET | `/api/admin/export` | 导出 Excel 报表 |
+| POST | `/api/admin/sessions` | 创建签到任务 |
+| POST | `/api/admin/sessions/{id}/end` | 结束签到任务 |
+| GET | `/api/admin/sessions/active` | 查看进行中任务 |
 
 ## 使用流程
 
@@ -244,15 +260,16 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8080
 1. 登录 `http://localhost:8080/login.html`（默认 admin / admin123）
 2. **签到点** → 添加实验室坐标（去[高德坐标拾取器](https://lbs.amap.com/tools/picker)获取经纬度）
 3. **人员管理** → 添加学生/教师 → 上传正面照注册人脸
-4. **生成二维码** → 选择类型和签到点 → 点击生成
-5. 将 QR 码展示在实验室大屏上
+4. **仪表盘** → 发布签到任务：选择签到点、设置日期范围/时间段/周期、勾选目标学生
+5. **生成二维码** → 选择类型和签到点 → 生成二维码展示在大屏上
+6. 任务结束后点击「结束签到」
 
 ### 学生
 
-1. 手机扫描大屏上的 QR 码
-2. 浏览器自动打开签到页面
-3. 授权位置 → 验证在实验室 100m 范围内
-4. 打开摄像头 → 拍照 → 人脸识别 → 签到成功
+1. 打开学生面板 → 查看可签到的任务列表
+2. 点击任务的「签到」按钮 → 选择扫码或拍照
+3. 扫码：用手机扫描二维码完成签到
+4. 拍照：打开摄像头 → 人脸识别 → 签到成功
 
 ### 签退
 
