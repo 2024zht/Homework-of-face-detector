@@ -57,6 +57,15 @@
   transition: all 0.15s; flex-shrink: 0;
 }
 .session-end-btn:hover { background: var(--danger); color: #fff; }
+
+/* ── QR Tab ─────────────────────────────────────── */
+.qr-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 768px) { .qr-layout { grid-template-columns: 1fr; } }
+.qr-generate-card h3, .qr-video-card h3 { margin-bottom: 6px; }
+.qr-desc { font-size: 0.83rem; color: var(--ink-muted); margin-bottom: 16px; }
+.qr-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 480px) { .qr-form-row { grid-template-columns: 1fr; } }
+#qrResult { animation: fadeIn 0.2s ease; }
 </style>
 </head>
 <body>
@@ -146,33 +155,42 @@
 
   <!-- Tab: QR Code -->
   <div id="tab-qrcode" class="hidden">
-    <h2 class="mb-2">&#x1f4f1; 生成签到二维码</h2>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-      <div class="card">
-        <h3 class="mb-2">生成二维码</h3>
-        <div class="input-group">
-          <label>类型</label>
-          <select class="input" id="qrType"><option value="checkin">签到</option><option value="checkout">签退</option></select>
+    <h2 class="mb-2">&#x1f4f1; 签到二维码</h2>
+    <div class="qr-layout">
+      <div class="card qr-generate-card">
+        <h3>生成二维码</h3>
+        <p class="qr-desc">用于学生扫码签到或签退，有效期 5 分钟</p>
+        <div class="qr-form-row">
+          <div class="session-field">
+            <label>类型</label>
+            <select id="qrType">
+              <option value="checkin">签到</option>
+              <option value="checkout">签退</option>
+            </select>
+          </div>
+          <div class="session-field">
+            <label>签到点</label>
+            <select id="qrLocation"></select>
+          </div>
         </div>
-        <div class="input-group">
-          <label>签到点</label>
-          <select class="input" id="qrLocation"></select>
-        </div>
-        <button class="btn btn-primary btn-block" onclick="generateQR()">&#x1f4f1; 生成二维码</button>
+        <button class="btn btn-primary btn-block" onclick="generateQR()" style="margin-top:4px">&#x1f4f1; 生成二维码</button>
         <div id="qrResult" class="hidden mt-3"></div>
       </div>
-      <div class="card">
-        <h3 class="mb-2">&#x1f3a5; 视频批量签到</h3>
-        <p style="font-size:0.85rem;color:var(--ink-secondary);margin-bottom:12px">上传视频，自动识别所有人脸并批量签到</p>
-        <div class="input-group">
-          <label>签到点</label>
-          <select class="input" id="videoLocation"></select>
+
+      <div class="card qr-video-card">
+        <h3>&#x1f3a5; 视频批量签到</h3>
+        <p class="qr-desc">上传视频文件，自动检测所有人脸并批量签到</p>
+        <div class="qr-form-row">
+          <div class="session-field">
+            <label>签到点</label>
+            <select id="videoLocation"></select>
+          </div>
+          <div class="session-field">
+            <label>视频文件</label>
+            <input type="file" id="videoFile" accept="video/*" style="padding:8px;font-size:0.88rem">
+          </div>
         </div>
-        <div class="input-group">
-          <label>视频文件</label>
-          <input type="file" class="input" id="videoFile" accept="video/*" style="padding:8px">
-        </div>
-        <button class="btn btn-primary btn-block" onclick="uploadVideo()" id="videoBtn">&#x1f3ac; 上传并批量签到</button>
+        <button class="btn btn-primary btn-block" onclick="uploadVideo()" id="videoBtn" style="margin-top:4px">&#x1f3ac; 上传并批量签到</button>
         <div id="videoResult" class="hidden mt-3"></div>
       </div>
     </div>
