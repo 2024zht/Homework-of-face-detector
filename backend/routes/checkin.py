@@ -260,7 +260,15 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/out", response_model=CheckInResponse)
 async def check_out(req: CheckOutRequest, db: AsyncSession = Depends(get_db)):
-    # Determine user — name-verified face recognition (priority order)
+    # 0. Validate QR token (must be a valid, unexpired checkout QR)
+    if req.token:
+        qr = await validate_qr_token(db, req.token)
+        if qr is None:
+            raise HTTPException(status_code=400, detail="QR码已过期或无效")
+        if qr.type != "checkout":
+            raise HTTPException(status_code=400, detail="此二维码是签到码，不是签退码")
+
+    # 1. Determine user — name-verified face recognition (priority order)
     user_id = None
     user_name = req.user_name.strip() if req.user_name else None
 

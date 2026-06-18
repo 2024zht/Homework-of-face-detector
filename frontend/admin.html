@@ -97,6 +97,10 @@
             <select id="sessionLocationSelect"></select>
           </div>
           <div class="session-field">
+            <label>任务名称</label>
+            <input type="text" id="sessionName" placeholder="如：周一实验室签到" maxlength="200">
+          </div>
+          <div class="session-field">
             <label>重复规则</label>
             <select id="sessionRecurringDays">
               <option value="">每天</option>
@@ -108,7 +112,7 @@
           </div>
           <div class="session-field">
             <label>开始日期</label>
-            <input type="date" id="sessionStartDate">
+            <input type="date" id="sessionStartDate" onchange="updateEndDateMin()">
           </div>
           <div class="session-field">
             <label>结束日期</label>
@@ -147,7 +151,7 @@
     <div class="card mt-2">
       <div style="display:flex;justify-content:space-between;align-items:center" class="mb-2">
         <h3>最近签到记录</h3>
-        <button class="btn btn-secondary" onclick="exportExcel()" style="padding:6px 14px;font-size:0.85rem">📥 导出Excel</button>
+        <button class="btn btn-secondary" onclick="openExportModal()" style="padding:6px 14px;font-size:0.85rem">📥 导出Excel</button>
       </div>
       <div class="table-wrap"><table id="recentTable"><thead><tr><th>照片</th><th>姓名</th><th>角色</th><th>签到时间</th><th>签退时间</th><th>地点</th><th>状态</th><th>操作</th></tr></thead><tbody></tbody></table></div>
     </div>
@@ -223,11 +227,14 @@
     <h2 class="mb-2">&#x1f4dd; 签到记录</h2>
     <div class="card">
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
-        <input type="date" class="input" id="recordDate" style="width:auto" onchange="loadRecords()">
+        <span style="font-size:0.82rem;color:var(--ink-muted)">日期:</span>
+        <input type="date" class="input" id="recordDateFrom" style="width:auto" onchange="loadRecords()">
+        <span style="font-size:0.82rem;color:var(--ink-muted)">至</span>
+        <input type="date" class="input" id="recordDateTo" style="width:auto" onchange="loadRecords()">
         <select class="input" id="recordStatus" style="width:auto" onchange="loadRecords()">
           <option value="">全部状态</option><option value="active">进行中</option><option value="completed">已完成</option>
         </select>
-        <button class="btn btn-primary" onclick="exportExcel()" style="padding:8px 16px;font-size:0.85rem">📥 导出Excel</button>
+        <button class="btn btn-primary" onclick="openExportModal()" style="padding:8px 16px;font-size:0.85rem">📥 导出Excel</button>
       </div>
       <div class="table-wrap"><table id="recordsTable"><thead><tr><th>照片</th><th>姓名</th><th>签到</th><th>签退</th><th>地点</th><th>时长</th><th>方式</th><th>操作</th></tr></thead><tbody></tbody></table></div>
     </div>
@@ -258,6 +265,11 @@
     <h3>添加签到点</h3>
     <form onsubmit="createLocation(event)">
       <div class="input-group"><label>名称</label><input class="input" id="locName" required placeholder="如：501实验室"></div>
+      <div class="input-group">
+        <label>坐标粘贴 (从高德复制整行)</label>
+        <input class="input" id="locCoordPaste" placeholder="直接粘贴高德坐标，如：39.90923,116.397428" oninput="parseCoordPaste()" style="font-size:0.85rem;border-color:var(--brand)">
+        <p style="font-size:0.72rem;color:var(--brand);margin-top:2px">支持格式: "纬度,经度" 或 "39.90923,116.397428"</p>
+      </div>
       <div class="input-group"><label>纬度 (GCJ-02)</label><input class="input" id="locLat" type="number" step="any" required placeholder="39.9042"></div>
       <div class="input-group"><label>经度 (GCJ-02)</label><input class="input" id="locLng" type="number" step="any" required placeholder="116.4074"></div>
       <div class="input-group"><label>允许范围 (米)</label><input class="input" id="locRadius" type="number" value="100" required></div>
@@ -489,10 +501,30 @@ async function resetUserPassword(userId, userName) {
   }
 }
 
-async function exportExcel() {
+function openExportModal() {
+  var today = new Date().toISOString().split('T')[0];
+  document.getElementById('exportDateFrom').value = '';
+  document.getElementById('exportDateTo').value = today;
+  document.getElementById('exportModal').classList.remove('hidden');
+}
+
+async function doExport() {
+  var dateFrom = document.getElementById('exportDateFrom').value;
+  var dateTo = document.getElementById('exportDateTo').value;
+  document.getElementById('exportModal').classList.add('hidden');
+  await _doExportExcel(dateFrom, dateTo);
+}
+
+async function _doExportExcel(dateFrom, dateTo) {
   const params = new URLSearchParams();
-  const dateInput = document.getElementById('recordDate');
-  if (dateInput && dateInput.value) params.set('date', dateInput.value);
+  if (dateFrom && dateTo) {
+    params.set('date_from', dateFrom);
+    params.set('date_to', dateTo);
+  } else if (dateTo) {
+    params.set('date', dateTo);
+  } else {
+    params.set('date', new Date().toISOString().split('T')[0]);
+  }
   const statusSelect = document.getElementById('recordStatus');
   if (statusSelect && statusSelect.value) params.set('status', statusSelect.value);
 
@@ -508,9 +540,17 @@ async function exportExcel() {
     const a = document.createElement('a');
     a.href = url;
     const disposition = res.headers.get('Content-Disposition');
-    a.download = disposition
-      ? disposition.split('filename=')[1].replace(/"/g, '')
-      : '签到记录.xlsx';
+    var downloadName = '签到记录.xlsx';
+    if (disposition) {
+      var starMatch = disposition.match(/filename\*=UTF-8''([^;]+)/);
+      if (starMatch && starMatch[1]) {
+        downloadName = decodeURIComponent(starMatch[1]);
+      } else {
+        var eqParts = disposition.split('filename=');
+        if (eqParts[1]) downloadName = eqParts[1].replace(/"/g, '');
+      }
+    }
+    a.download = downloadName;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -537,7 +577,23 @@ async function deleteLocation(id, name) {
   loadSessionInit(); // also refresh the session form dropdown
 }
 
-function showLocationModal() { document.getElementById('locationModal').classList.remove('hidden'); }
+function showLocationModal() { document.getElementById('locationModal').classList.remove('hidden'); document.getElementById('locCoordPaste').value = ''; }
+
+function parseCoordPaste() {
+  var raw = document.getElementById('locCoordPaste').value.trim();
+  if (!raw) return;
+  // Parse "lat,lng" format — 纬度在前，经度在后
+  // Handles "39.90923,116.397428" with spaces or Chinese commas
+  var parts = raw.split(/[,，\s]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    var a = parseFloat(parts[0]);
+    var b = parseFloat(parts[1]);
+    if (!isNaN(a) && !isNaN(b)) {
+      document.getElementById('locLat').value = a;
+      document.getElementById('locLng').value = b;
+    }
+  }
+}
 
 async function createLocation(e) {
   e.preventDefault();
@@ -554,10 +610,10 @@ async function createLocation(e) {
 
 // Records
 async function loadRecords() {
-  const date = document.getElementById('recordDate').value;
+  const dateFrom = document.getElementById('recordDateFrom');
   const status = document.getElementById('recordStatus').value;
   const params = new URLSearchParams();
-  if (date) params.set('date', date);
+  if (dateFrom && dateFrom.value) params.set('date', dateFrom.value);
   if (status) params.set('status', status);
   const r = await api('/api/admin/checkins?' + params);
   const records = await r.json();
@@ -750,6 +806,7 @@ async function startSession() {
   btn.disabled = true; btn.textContent = '发布中...';
 
   var body = {location_id: locId};
+  var n = document.getElementById('sessionName').value.trim(); if (n) body.name = n;
   var v = document.getElementById('sessionStartDate').value; if (v) body.start_date = v;
   v = document.getElementById('sessionEndDate').value; if (v) body.end_date = v;
   v = document.getElementById('sessionStartTime').value; if (v) body.checkin_start_time = v;
@@ -789,7 +846,20 @@ async function endSession(sessionId) {
 
 // Init
 function logout() { localStorage.clear(); window.location.href = '/login.html'; }
-document.getElementById('recordDate').value = new Date().toISOString().split('T')[0];
+document.getElementById('recordDateTo').value = new Date().toISOString().split('T')[0];
+// Set date picker minimums to today (Fix 1)
+(function() {
+  var today = new Date().toISOString().split('T')[0];
+  var s = document.getElementById('sessionStartDate');
+  var e = document.getElementById('sessionEndDate');
+  if (s) { s.setAttribute('min', today); }
+  if (e) { e.setAttribute('min', today); }
+})();
+function updateEndDateMin() {
+  var sd = document.getElementById('sessionStartDate').value;
+  var ed = document.getElementById('sessionEndDate');
+  if (sd && ed) { ed.setAttribute('min', sd); if (ed.value && ed.value < sd) ed.value = sd; }
+}
 loadSessionInit();
 loadSessionStatus();
 loadDashboard();
@@ -813,6 +883,28 @@ loadDashboard();
         <button class="btn btn-secondary" onclick="document.getElementById('correctModal').classList.add('hidden')">取消</button>
       </div>
       <div id="correctMsg" class="text-center mt-2 hidden"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Export modal -->
+<div class="modal-overlay hidden" id="exportModal">
+  <div class="modal" style="max-width:420px">
+    <h3>&#x1f4e5; 导出签到记录</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
+      <div class="session-field">
+        <label>开始日期</label>
+        <input type="date" class="input" id="exportDateFrom">
+      </div>
+      <div class="session-field">
+        <label>结束日期</label>
+        <input type="date" class="input" id="exportDateTo">
+      </div>
+    </div>
+    <p style="font-size:0.78rem;color:var(--ink-muted);margin-top:8px">留空开始日期导出单日，填写范围导出多日记录</p>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-primary" onclick="doExport()">&#x1f4e5; 导出</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('exportModal').classList.add('hidden')">取消</button>
     </div>
   </div>
 </div>

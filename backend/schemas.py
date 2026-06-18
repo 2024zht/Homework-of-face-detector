@@ -148,6 +148,7 @@ class LocationValidateRequest(BaseModel):
 # ── Check-In Session ──────────────────────────────────────
 class SessionCreate(BaseModel):
     location_id: int
+    name: Optional[str] = None  # human-readable session name
     start_date: Optional[str] = None   # "2026-06-16"
     end_date: Optional[str] = None     # "2026-06-20"
     checkin_start_time: Optional[str] = None  # "08:00"
@@ -160,6 +161,7 @@ class SessionResponse(BaseModel):
     id: int
     location_id: int
     location_name: Optional[str] = None
+    name: Optional[str] = None
     created_by: int
     creator_name: Optional[str] = None
     status: str

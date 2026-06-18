@@ -49,7 +49,7 @@
     </div>
 
     <div id="stepName" class="hidden">
-      <p style="font-size:0.9rem;margin-bottom:12px">确认身份信息，点击签到</p>
+      <p style="font-size:0.9rem;margin-bottom:12px" id="stepNameDesc">确认身份信息，点击签到</p>
       <div class="input-group">
         <input type="text" class="input" id="userName" placeholder="输入姓名" required>
       </div>
@@ -71,6 +71,11 @@ var userLat = null, userLng = null, locationVerified = false, coordSource = null
   token = p.get('token'); qrType = p.get('type') || 'checkin'; locationId = p.get('location_id');
   if (token) {
     document.getElementById('tokenInfo').textContent = 'Session: ' + token.slice(0,8) + '... | ' + qrType;
+    // Update UI text for checkout vs checkin
+    if (qrType === 'checkout') {
+      document.getElementById('checkinBtn').innerHTML = '&#x2705; 确认签退';
+      document.getElementById('stepNameDesc').textContent = '确认身份信息，点击签退';
+    }
     fetch(API + '/api/qr/validate/' + token).then(function(r){return r.json()}).then(function(d){
       if (!d.valid) showToast('二维码已过期', 'error');
       else document.getElementById('stepTitle').textContent = (d.location_name || '签到点') + ' - ' + (qrType === 'checkin' ? '签到' : '签退');

@@ -104,6 +104,7 @@ class CheckInSession(Base):
     checkin_end_time = Column(Time, nullable=True)    # daily end (e.g., 20:00)
     recurring_days = Column(String(20), nullable=True)  # "5"=Sat, "0,1,2,3,4"=Mon-Fri, null=every day
     target_user_ids = Column(Text, nullable=True)  # comma-separated user IDs, null=all users
+    name = Column(String(200), nullable=True)  # human-readable session name
 
     location = relationship("Location")
     creator = relationship("User", foreign_keys=[created_by])

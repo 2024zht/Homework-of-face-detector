@@ -61,6 +61,7 @@ async def _migrate_checkin_sessions_table(conn):
             ("checkin_start_time", "TIME"), ("checkin_end_time", "TIME"),
             ("recurring_days", "VARCHAR(20)"),
             ("target_user_ids", "TEXT"),
+            ("name", "VARCHAR(200)"),
         ]:
             if col not in existing:
                 await conn.execute(text(f"ALTER TABLE checkin_sessions ADD COLUMN {col} {col_type}"))
