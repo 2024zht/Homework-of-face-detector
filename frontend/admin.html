@@ -47,7 +47,8 @@
   border: 1px solid var(--border); margin-bottom: 8px;
   gap: 12px; flex-wrap: wrap; transition: box-shadow 0.15s;
 }
-.session-list-item:hover { box-shadow: var(--shadow-sm); }
+.session-list-item:hover { box-shadow: var(--shadow-sm); background: var(--surface-hover); }
+.session-list-item { cursor: pointer; }
 .session-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 0.88rem; }
 .session-meta .sep { width: 4px; height: 4px; border-radius: 50%; background: var(--ink-muted); flex-shrink: 0; }
 .session-end-btn {
@@ -164,6 +165,12 @@
       <div class="card qr-generate-card">
         <h3>生成二维码</h3>
         <p class="qr-desc">用于学生扫码签到或签退，有效期 5 分钟</p>
+        <div class="session-field" style="margin-bottom:12px">
+          <label>签到任务</label>
+          <select id="qrSessionSelect" onchange="onQrSessionChange()">
+            <option value="">不指定任务</option>
+          </select>
+        </div>
         <div class="qr-form-row">
           <div class="session-field">
             <label>类型</label>
@@ -184,6 +191,12 @@
       <div class="card qr-video-card">
         <h3>&#x1f3a5; 视频批量签到</h3>
         <p class="qr-desc">上传视频文件，自动检测所有人脸并批量签到</p>
+        <div class="session-field" style="margin-bottom:12px">
+          <label>签到任务</label>
+          <select id="videoSessionSelect" onchange="onVideoSessionChange()">
+            <option value="">不指定任务</option>
+          </select>
+        </div>
         <div class="qr-form-row">
           <div class="session-field">
             <label>签到点</label>
@@ -390,22 +403,55 @@ async function loadDashboard() {
 }
 
 // QR
+async function populateSessionSelect(selectId) {
+  try {
+    var r = await api('/api/admin/sessions/active');
+    var d = await r.json();
+    var sessions = d.sessions || [];
+    var sel = document.getElementById(selectId);
+    if (!sel) return;
+    var currentVal = sel.value;
+    sel.innerHTML = '<option value="">不指定任务</option>';
+    for (var i = 0; i < sessions.length; i++) {
+      var s = sessions[i];
+      sel.innerHTML += '<option value="' + s.id + '" data-location="' + (s.location_id || '') + '">' + (s.name || '任务#' + s.id) + '</option>';
+    }
+    if (currentVal) sel.value = currentVal;
+  } catch(e) {}
+}
+
 async function loadLocationSelect() {
   const r = await api('/api/admin/locations');
   const locs = await r.json();
   const sel = document.getElementById('qrLocation');
   sel.innerHTML = locs.map(l => `<option value="${l.id}">${l.name} (${l.latitude}, ${l.longitude})</option>`).join('');
   if (locs.length === 0) sel.innerHTML = '<option value="">— 请先在"签到点"页添加 —</option>';
+  await populateSessionSelect('qrSessionSelect');
+}
+
+function onQrSessionChange() {
+  var sel = document.getElementById('qrSessionSelect');
+  var opt = sel.options[sel.selectedIndex];
+  var locId = opt.getAttribute('data-location');
+  if (locId) {
+    var locSel = document.getElementById('qrLocation');
+    if (locSel.querySelector('option[value="' + locId + '"]')) {
+      locSel.value = locId;
+    }
+  }
 }
 
 async function generateQR() {
   const locId = document.getElementById('qrLocation').value;
   if (!locId) return alert('请先添加签到点');
   const type = document.getElementById('qrType').value;
+  const body = {type, location_id: parseInt(locId)};
+  var sessionId = document.getElementById('qrSessionSelect').value;
+  if (sessionId) body.session_id = parseInt(sessionId);
   const r = await api('/api/qr/generate', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({type, location_id: parseInt(locId)}),
+    body: JSON.stringify(body),
   });
   const d = await r.json();
   document.getElementById('qrResult').classList.remove('hidden');
@@ -642,11 +688,24 @@ async function loadRecords() {
 }
 
 // Video upload
+function onVideoSessionChange() {
+  var sel = document.getElementById('videoSessionSelect');
+  var opt = sel.options[sel.selectedIndex];
+  var locId = opt.getAttribute('data-location');
+  if (locId) {
+    var locSel = document.getElementById('videoLocation');
+    if (locSel.querySelector('option[value="' + locId + '"]')) {
+      locSel.value = locId;
+    }
+  }
+}
+
 async function loadVideoLocationSelect() {
   const r = await api('/api/admin/locations');
   const locs = await r.json();
   const sel = document.getElementById('videoLocation');
   sel.innerHTML = locs.map(l => `<option value="${l.id}">${l.name}</option>`).join('');
+  await populateSessionSelect('videoSessionSelect');
 }
 
 async function uploadVideo() {
@@ -657,10 +716,13 @@ async function uploadVideo() {
   if (!locId) return alert('请先选择签到点');
 
   // First generate a QR token
+  var qrBody = {type: 'checkin', location_id: parseInt(locId)};
+  var sessionId = document.getElementById('videoSessionSelect').value;
+  if (sessionId) qrBody.session_id = parseInt(sessionId);
   const qrRes = await api('/api/qr/generate', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({type: 'checkin', location_id: parseInt(locId)}),
+    body: JSON.stringify(qrBody),
   });
   const qrData = await qrRes.json();
 
@@ -675,6 +737,7 @@ async function uploadVideo() {
   formData.append('token', qrData.token);
   formData.append('latitude', '36.547308');
   formData.append('longitude', '116.83223');
+  if (sessionId) formData.append('session_id', sessionId);
 
   try {
     const res = await fetch(API + '/api/check/batch-video', {
@@ -734,7 +797,8 @@ async function loadSessionStatus() {
         var cls = s.time_valid ? 'badge-success' : 'badge-warning';
         var txt = s.time_valid ? '进行中' : '非签到时间';
         var meta = '';
-        meta += '<b>' + (s.location_name || '-') + '</b>';
+        meta += '<b>' + (s.name || '任务#' + s.id) + '</b>';
+        meta += ' <span class="sep"></span> ' + (s.location_name || '-');
         if (s.checkin_start_time) meta += ' <span class="sep"></span> ' + s.checkin_start_time + '–' + s.checkin_end_time;
         if (s.start_date) meta += ' <span class="sep"></span> ' + (s.start_date||'') + (s.end_date ? ' → ' + s.end_date : '');
         if (s.recurring_days) {
@@ -743,9 +807,9 @@ async function loadSessionStatus() {
         }
         var count = s.target_user_ids ? s.target_user_ids.split(',').length + '人' : '所有人';
         meta += ' <span class="sep"></span> ' + count;
-        html += '<div class="session-list-item">';
+        html += '<div class="session-list-item" onclick="openSessionDetail(' + s.id + ')">';
         html += '<div class="session-meta"><span class="badge ' + cls + '">' + txt + '</span>' + meta + '</div>';
-        html += '<button class="session-end-btn" onclick="endSession(' + s.id + ')">结束</button>';
+        html += '<button class="session-end-btn" onclick="event.stopPropagation();endSession(' + s.id + ')">结束</button>';
         html += '</div>';
       }
       listDiv.innerHTML = html;
@@ -844,6 +908,171 @@ async function endSession(sessionId) {
   }
 }
 
+// ── Session Detail Modal ──────────────────────────────────
+var _currentSessionId = null;
+var _currentEditSession = null;
+
+function openSessionDetail(sessionId) {
+  // Find session in _activeSessions
+  var session = null;
+  for (var i = 0; i < _activeSessions.length; i++) {
+    if (_activeSessions[i].id === sessionId) { session = _activeSessions[i]; break; }
+  }
+  if (!session) return;
+  _currentSessionId = sessionId;
+  _currentEditSession = session;
+
+  // Populate view mode
+  document.getElementById('sessionDetailName').textContent = session.name || '任务#' + session.id;
+  var cls = session.time_valid ? 'badge-success' : 'badge-warning';
+  var txt = session.time_valid ? '进行中' : '非签到时间';
+  document.getElementById('sessionDetailBadge').innerHTML = '<span class="badge ' + cls + '">' + txt + '</span>';
+
+  var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
+  var recurringDisplay = '—';
+  if (session.recurring_days) {
+    recurringDisplay = session.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join('·');
+  } else if (session.recurring_days === '') {
+    recurringDisplay = '每天';
+  }
+  var targetDisplay = session.target_user_ids ? session.target_user_ids.split(',').length + '人' : '所有人';
+  var creatorDisplay = session.creator_name || '—';
+
+  var gridHtml = '';
+  gridHtml += '<div class="session-detail-row"><span class="session-detail-label">签到点</span><span class="session-detail-value">' + (session.location_name || '—') + '</span></div>';
+  gridHtml += '<div class="session-detail-row"><span class="session-detail-label">日期范围</span><span class="session-detail-value">' + (session.start_date||'') + ' → ' + (session.end_date||'') + '</span></div>';
+  gridHtml += '<div class="session-detail-row"><span class="session-detail-label">签到时间</span><span class="session-detail-value">' + (session.checkin_start_time||'—') + ' – ' + (session.checkin_end_time||'—') + '</span></div>';
+  gridHtml += '<div class="session-detail-row"><span class="session-detail-label">重复规则</span><span class="session-detail-value">' + recurringDisplay + '</span></div>';
+  gridHtml += '<div class="session-detail-row"><span class="session-detail-label">目标人员</span><span class="session-detail-value">' + targetDisplay + '</span></div>';
+  gridHtml += '<div class="session-detail-row"><span class="session-detail-label">创建者</span><span class="session-detail-value">' + creatorDisplay + '</span></div>';
+  gridHtml += '<div class="session-detail-row"><span class="session-detail-label">创建时间</span><span class="session-detail-value">' + (session.created_at ? new Date(session.created_at).toLocaleString() : '—') + '</span></div>';
+  document.getElementById('sessionDetailGrid').innerHTML = gridHtml;
+
+  // Show view, hide edit
+  document.getElementById('sessionDetailView').classList.remove('hidden');
+  document.getElementById('sessionDetailEdit').classList.add('hidden');
+  document.getElementById('sessionDetailModal').classList.remove('hidden');
+}
+
+function toggleSessionEdit() {
+  var viewDiv = document.getElementById('sessionDetailView');
+  var editDiv = document.getElementById('sessionDetailEdit');
+  var isEditing = !editDiv.classList.contains('hidden');
+
+  if (isEditing) {
+    // Switch back to view
+    editDiv.classList.add('hidden');
+    viewDiv.classList.remove('hidden');
+    return;
+  }
+
+  // Switch to edit mode — populate form
+  var s = _currentEditSession;
+  if (!s) return;
+
+  document.getElementById('editSessionName').value = s.name || '';
+  document.getElementById('editSessionRecurringDays').value = s.recurring_days || '';
+  document.getElementById('editSessionStartDate').value = s.start_date || '';
+  document.getElementById('editSessionEndDate').value = s.end_date || '';
+  document.getElementById('editSessionStartTime').value = s.checkin_start_time || '08:00';
+  document.getElementById('editSessionEndTime').value = s.checkin_end_time || '20:00';
+
+  // Populate user checkboxes
+  var grid = document.getElementById('editUserCheckboxGrid');
+  var targetIds = s.target_user_ids ? s.target_user_ids.split(',') : [];
+  var html = '';
+  for (var i = 0; i < _allUsers.length; i++) {
+    var u = _allUsers[i];
+    var checked = targetIds.length === 0 ? ' checked' : (targetIds.indexOf(String(u.id)) >= 0 ? ' checked' : '');
+    html += '<label style="display:flex;align-items:center;gap:4px;font-size:0.8rem;cursor:pointer;padding:1px 0;white-space:nowrap">';
+    html += '<input type="checkbox" value="' + u.id + '" class="editTargetUserCb"' + checked + ' style="margin:0"> ' + u.name;
+    html += '</label>';
+  }
+  grid.innerHTML = html;
+
+  viewDiv.classList.add('hidden');
+  editDiv.classList.remove('hidden');
+}
+
+function toggleEditAllUsers(on) {
+  var cbs = document.querySelectorAll('.editTargetUserCb');
+  for (var i = 0; i < cbs.length; i++) cbs[i].checked = on;
+}
+
+async function saveSessionEdit(sessionId) {
+  var body = {};
+  var v = document.getElementById('editSessionName').value.trim(); if (v) body.name = v;
+  v = document.getElementById('editSessionStartDate').value; if (v) body.start_date = v;
+  v = document.getElementById('editSessionEndDate').value; if (v) body.end_date = v;
+  v = document.getElementById('editSessionStartTime').value; if (v) body.checkin_start_time = v;
+  v = document.getElementById('editSessionEndTime').value; if (v) body.checkin_end_time = v;
+  v = document.getElementById('editSessionRecurringDays').value; body.recurring_days = v;
+
+  var cbs = document.querySelectorAll('.editTargetUserCb:checked');
+  if (cbs.length > 0) {
+    var ids = [];
+    for (var i = 0; i < cbs.length; i++) ids.push(cbs[i].value);
+    body.target_user_ids = ids.join(',');
+  } else {
+    body.target_user_ids = '';
+  }
+
+  try {
+    var r = await api('/api/admin/sessions/' + sessionId, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    var d = await r.json();
+    if (r.ok) {
+      closeSessionDetail();
+      await loadSessionStatus();
+    } else {
+      alert(d.detail || '保存失败');
+    }
+  } catch(e) {
+    alert('网络错误: ' + e.message);
+  }
+}
+
+async function exportSessionExcel(sessionId, type) {
+  try {
+    var res = await api('/api/admin/sessions/' + sessionId + '/export?type=' + type);
+    if (!res.ok) {
+      var err = await res.json();
+      alert(err.detail || '导出失败');
+      return;
+    }
+    var blob = await res.blob();
+    var url = window.URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    var disposition = res.headers.get('Content-Disposition');
+    var downloadName = type === 'checked_in' ? '已签到记录.xlsx' : '未签到记录.xlsx';
+    if (disposition) {
+      var starMatch = disposition.match(/filename\*=UTF-8''([^;]+)/);
+      if (starMatch && starMatch[1]) {
+        downloadName = decodeURIComponent(starMatch[1]);
+      } else {
+        var eqParts = disposition.split('filename=');
+        if (eqParts[1]) downloadName = eqParts[1].replace(/"/g, '');
+      }
+    }
+    a.download = downloadName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  } catch(err) {
+    alert('导出失败: ' + err.message);
+  }
+}
+
+function closeSessionDetail() {
+  document.getElementById('sessionDetailModal').classList.add('hidden');
+  _currentSessionId = null;
+}
+
 // Init
 function logout() { localStorage.clear(); window.location.href = '/login.html'; }
 document.getElementById('recordDateTo').value = new Date().toISOString().split('T')[0];
@@ -905,6 +1134,70 @@ loadDashboard();
     <div style="display:flex;gap:8px;margin-top:16px">
       <button class="btn btn-primary" onclick="doExport()">&#x1f4e5; 导出</button>
       <button class="btn btn-secondary" onclick="document.getElementById('exportModal').classList.add('hidden')">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- Session detail modal -->
+<div class="modal-overlay hidden" id="sessionDetailModal">
+  <div class="modal" style="max-width:560px">
+    <div id="sessionDetailView">
+      <h3 id="sessionDetailName"></h3>
+      <div class="mt-1" id="sessionDetailBadge"></div>
+      <div class="session-detail-grid mt-2" id="sessionDetailGrid"></div>
+      <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
+        <button class="btn btn-secondary" onclick="toggleSessionEdit()">&#x270f; 编辑任务</button>
+        <button class="btn btn-primary" id="sessionExportCheckedBtn" onclick="exportSessionExcel(_currentSessionId, 'checked_in')">&#x1f4e5; 导出已签到</button>
+        <button class="btn btn-warning" id="sessionExportAbsentBtn" onclick="exportSessionExcel(_currentSessionId, 'absent')">&#x1f4e5; 导出未签到</button>
+        <button class="btn btn-secondary" onclick="closeSessionDetail()">关闭</button>
+      </div>
+    </div>
+    <div id="sessionDetailEdit" class="hidden">
+      <h3>&#x270f; 编辑任务</h3>
+      <div class="session-form-grid mt-2">
+        <div class="session-field">
+          <label>任务名称</label>
+          <input type="text" id="editSessionName" class="input" maxlength="200">
+        </div>
+        <div class="session-field">
+          <label>重复规则</label>
+          <select id="editSessionRecurringDays" class="input">
+            <option value="">每天</option>
+            <option value="0,1,2,3,4">周一至周五</option>
+            <option value="5">每周六</option>
+            <option value="6">每周日</option>
+            <option value="5,6">周六日</option>
+          </select>
+        </div>
+        <div class="session-field">
+          <label>开始日期</label>
+          <input type="date" id="editSessionStartDate" class="input">
+        </div>
+        <div class="session-field">
+          <label>结束日期</label>
+          <input type="date" id="editSessionEndDate" class="input">
+        </div>
+        <div class="session-field">
+          <label>开始时间</label>
+          <input type="time" id="editSessionStartTime" class="input">
+        </div>
+        <div class="session-field">
+          <label>结束时间</label>
+          <input type="time" id="editSessionEndTime" class="input">
+        </div>
+      </div>
+      <div class="session-field mt-2">
+        <label>&#x1f465; 签到人员</label>
+        <div class="user-toolbar">
+          <a href="#" onclick="toggleEditAllUsers(true);return false">全选</a>
+          <a href="#" onclick="toggleEditAllUsers(false);return false">取消全选</a>
+        </div>
+        <div class="user-grid" id="editUserCheckboxGrid"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px">
+        <button class="btn btn-primary" onclick="saveSessionEdit(_currentSessionId)">&#x1f4be; 保存</button>
+        <button class="btn btn-secondary" onclick="toggleSessionEdit()">取消</button>
+      </div>
     </div>
   </div>
 </div>

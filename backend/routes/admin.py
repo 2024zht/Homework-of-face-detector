@@ -23,7 +23,7 @@ from schemas import (
     UserCreate, UserResponse, LocationCreate, LocationResponse,
     CheckInRecord, StatisticsResponse, LocationValidateRequest,
     AdminResetPasswordRequest, CorrectionRequest,
-    SessionCreate, SessionResponse, ActiveSessionResponse,
+    SessionCreate, SessionResponse, ActiveSessionResponse, SessionUpdate,
 )
 from services.face_service import (
     extract_embedding, embedding_to_bytes,
@@ -865,6 +865,317 @@ async def end_session(
     session.ended_at = beijing_now_naive()
     await db.commit()
     return _session_to_response(session)
+
+
+@router.put("/sessions/{session_id}", response_model=SessionResponse)
+async def update_session(
+    session_id: int,
+    req: SessionUpdate,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(get_current_admin),
+):
+    """Update an existing check-in session. location_id cannot be changed."""
+    stmt = (select(CheckInSession).where(CheckInSession.id == session_id)
+            .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
+    result = await db.execute(stmt)
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="签到任务不存在")
+
+    # 只更新提供的字段，不修改 location_id
+    if req.name is not None:
+        session.name = req.name.strip() if req.name else None
+    if req.start_date is not None:
+        session.start_date = _parse_date(req.start_date)
+    if req.end_date is not None:
+        session.end_date = _parse_date(req.end_date)
+    if req.checkin_start_time is not None:
+        session.checkin_start_time = _parse_time(req.checkin_start_time)
+    if req.checkin_end_time is not None:
+        session.checkin_end_time = _parse_time(req.checkin_end_time)
+    if req.recurring_days is not None:
+        session.recurring_days = req.recurring_days.strip() if req.recurring_days else None
+    if req.target_user_ids is not None:
+        session.target_user_ids = req.target_user_ids.strip() if req.target_user_ids else None
+
+    await db.commit()
+    return _session_to_response(session)
+
+
+@router.get("/sessions/{session_id}/export")
+async def export_session_checkins(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(get_current_admin),
+):
+    """Export checkin records for a single session as Excel with two sheets: 已签到 / 未签到."""
+    # ── 查找任务 ──
+    stmt = (select(CheckInSession).where(CheckInSession.id == session_id)
+            .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
+    result = await db.execute(stmt)
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="签到任务不存在")
+
+    session_name = session.name or f"Session#{session_id}"
+
+    # ── 确定日期范围 ──
+    if session.start_date:
+        d_from = session.start_date
+    else:
+        d_from = beijing_now_naive().date()
+    if session.end_date:
+        d_to = session.end_date
+    else:
+        d_to = beijing_now_naive().date()
+
+    date_label = f"{d_from.isoformat()} 至 {d_to.isoformat()}"
+    day_start = datetime(d_from.year, d_from.month, d_from.day)
+    day_end = datetime(d_to.year, d_to.month, d_to.day, 23, 59, 59)
+
+    # ── 解析目标任务用户 ──
+    target_ids = None
+    if session.target_user_ids:
+        target_ids = set()
+        for uid in session.target_user_ids.split(","):
+            uid = uid.strip()
+            if uid.isdigit():
+                target_ids.add(int(uid))
+
+    # ── 获取签到记录 ──
+    ci_stmt = select(CheckIn).options(selectinload(CheckIn.user)).where(
+        CheckIn.check_in_time >= day_start,
+        CheckIn.check_in_time <= day_end,
+    )
+    ci_result = await db.execute(ci_stmt)
+    records = list(ci_result.scalars().all())
+
+    # ── 排序：日期升序 → 同日按姓名升序 ──
+    records.sort(key=lambda r: (r.check_in_time.date() if r.check_in_time else d_from,
+                                 r.user.name if r.user else ""))
+
+    # ── 获取所有活跃学生 ──
+    users_stmt = select(User).where(User.is_active == True, User.role == "student").order_by(User.name)
+    users_result = await db.execute(users_stmt)
+    all_students = list(users_result.scalars().all())
+    student_map = {u.id: u for u in all_students}
+
+    # ── 按天构建出勤数据（仅此任务） ──
+    all_dates = []
+    cursor = d_from
+    while cursor <= d_to:
+        all_dates.append(cursor)
+        cursor += timedelta(days=1)
+
+    # 按日期分组记录
+    records_by_date = {}
+    for r in records:
+        rd = r.check_in_time.date() if r.check_in_time else d_from
+        records_by_date.setdefault(rd, []).append(r)
+
+    def _session_valid_for_date(sess, check_date):
+        """检查任务在某天是否有效。"""
+        if sess.status != "active" and sess.status != "ended":
+            return False
+        if sess.start_date and check_date < sess.start_date:
+            return False
+        if sess.end_date and check_date > sess.end_date:
+            return False
+        if sess.recurring_days:
+            weekday = str(check_date.weekday())
+            valid_days = [d.strip() for d in sess.recurring_days.split(",") if d.strip()]
+            if weekday not in valid_days:
+                return False
+        return True
+
+    # 每日缺勤分析
+    day_absent_data = []
+    total_absent_days = 0
+
+    for day in all_dates:
+        if not _session_valid_for_date(session, day):
+            continue  # 该天任务不生效
+
+        # 本任务的目标用户
+        if target_ids is not None:
+            expected_ids = target_ids.copy()
+        else:
+            expected_ids = set(u.id for u in all_students)
+
+        if not expected_ids:
+            continue
+
+        day_records = records_by_date.get(day, [])
+        day_checked_ids = set(r.user_id for r in day_records)
+        day_absent_ids = expected_ids - day_checked_ids
+
+        absent_students = [student_map[uid] for uid in sorted(day_absent_ids) if uid in student_map]
+        if absent_students:
+            total_absent_days += len(absent_students)
+        day_absent_data.append({
+            "date": day,
+            "absent": absent_students,
+            "expected": len(expected_ids),
+            "checked": len(day_checked_ids & expected_ids),
+            "sessions": session_name,  # 仅此任务
+        })
+
+    # ── 整体已签到用户 ──
+    checked_in_user_ids = set()
+    for r in records:
+        checked_in_user_ids.add(r.user_id)
+
+    # ── 样式 ──
+    header_font = Font(bold=True, size=11)
+    header_fill = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
+    title_font = Font(bold=True, size=14)
+    thin_border = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin"),
+    )
+    absent_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    day_header_fill = PatternFill(start_color="D9EAD3", end_color="D9EAD3", fill_type="solid")
+
+    # 每人颜色
+    user_colors = [
+        "E8F5E9", "FFF3E0", "E3F2FD", "FCE4EC", "F3E5F5",
+        "E0F7FA", "FFF8E1", "EDE7F6", "EFEBE9", "E8EAF6",
+        "F1F8E9", "FBE9E7", "E0F2F1", "FFF9C4", "F5F5F5",
+    ]
+    user_color_map = {}
+    _color_idx = 0
+    for r in records:
+        uid = r.user_id
+        if uid not in user_color_map:
+            user_color_map[uid] = user_colors[_color_idx % len(user_colors)]
+            _color_idx += 1
+
+    export_time = beijing_now_naive().strftime("%Y-%m-%d %H:%M")
+
+    wb = Workbook()
+
+    # ═══════════════ Sheet 1: 已签到 ═══════════════
+    ws1 = wb.active
+    ws1.title = "已签到"
+
+    ws1.merge_cells("A1:K1")
+    ws1["A1"] = f"已签到记录 — {session_name} ({date_label})"
+    ws1["A1"].font = title_font
+    ws1["A1"].alignment = Alignment(horizontal="center")
+
+    ws1.merge_cells("A2:K2")
+    ws1["A2"] = f"导出时间: {export_time}  |  签到人数: {len(checked_in_user_ids)}  |  总记录: {len(records)}"
+    ws1["A2"].alignment = Alignment(horizontal="center")
+
+    checked_in_headers = ["序号", "姓名", "用户名", "角色", "签到时间", "签退时间", "签到点", "时长(分钟)", "状态", "签到方式"]
+    for col, h in enumerate(checked_in_headers, 1):
+        cell = ws1.cell(row=4, column=col, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal="center")
+
+    for i, r in enumerate(records, 1):
+        user = r.user
+        duration = ""
+        if r.check_out_time:
+            duration = round((r.check_out_time - r.check_in_time).total_seconds() / 60, 1)
+        method = "自动签退" if r.is_auto_checkout else ("进行中" if r.status == "active" else "手动签退")
+        status_text = "进行中" if r.status == "active" else "已完成"
+
+        row_data = [
+            i,
+            user.name if user else f"User#{r.user_id}",
+            user.username if user else "",
+            user.role if user else "student",
+            r.check_in_time.strftime("%Y-%m-%d %H:%M:%S") if r.check_in_time else "",
+            r.check_out_time.strftime("%Y-%m-%d %H:%M:%S") if r.check_out_time else "",
+            r.location_name or "",
+            duration,
+            status_text,
+            method,
+        ]
+        row_fill = PatternFill(start_color=user_color_map.get(r.user_id, "FFFFFF"),
+                               end_color=user_color_map.get(r.user_id, "FFFFFF"), fill_type="solid")
+        for col, val in enumerate(row_data, 1):
+            cell = ws1.cell(row=i + 4, column=col, value=val)
+            cell.border = thin_border
+            cell.fill = row_fill
+
+    col_widths_1 = [6, 10, 12, 8, 20, 20, 18, 12, 8, 12]
+    for col, w in enumerate(col_widths_1, 1):
+        ws1.column_dimensions[get_column_letter(col)].width = w
+
+    # ═══════════════ Sheet 2: 未签到 (按天) ═══════════════
+    ws2 = wb.create_sheet("未签到")
+
+    ws2.merge_cells("A1:F1")
+    ws2["A1"] = f"未签到明细 — {session_name} ({date_label})"
+    ws2["A1"].font = title_font
+    ws2["A1"].alignment = Alignment(horizontal="center")
+
+    ws2.merge_cells("A2:F2")
+    total_absent_unique = len(set(
+        uid for d in day_absent_data for u in d["absent"] for uid in [u.id]
+    )) if day_absent_data else 0
+    ws2["A2"] = f"导出时间: {export_time}  |  涉及天数: {len(day_absent_data)}  |  缺勤人次: {total_absent_days}"
+    ws2["A2"].alignment = Alignment(horizontal="center")
+
+    absent_headers = ["日期", "序号", "姓名", "用户名", "角色", "关联任务"]
+    for col, h in enumerate(absent_headers, 1):
+        cell = ws2.cell(row=4, column=col, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal="center")
+
+    row = 5
+    for day_data in day_absent_data:
+        day_str = day_data["date"].strftime("%Y-%m-%d")
+        sessions_str = day_data["sessions"]
+
+        if not day_data["absent"]:
+            cell = ws2.cell(row=row, column=1, value=day_str)
+            cell.border = thin_border; cell.fill = day_header_fill
+            cell = ws2.cell(row=row, column=2, value="—")
+            cell.border = thin_border; cell.fill = day_header_fill
+            cell = ws2.cell(row=row, column=3, value="全员到齐")
+            cell.border = thin_border; cell.fill = day_header_fill
+            cell = ws2.cell(row=row, column=4, value="")
+            cell.border = thin_border; cell.fill = day_header_fill
+            cell = ws2.cell(row=row, column=5, value="")
+            cell.border = thin_border; cell.fill = day_header_fill
+            cell = ws2.cell(row=row, column=6, value=sessions_str)
+            cell.border = thin_border; cell.fill = day_header_fill
+            row += 1
+        else:
+            for idx, u in enumerate(day_data["absent"], 1):
+                row_data = [day_str if idx == 1 else "", idx, u.name, u.username, u.role, sessions_str if idx == 1 else ""]
+                for col, val in enumerate(row_data, 1):
+                    cell = ws2.cell(row=row, column=col, value=val)
+                    cell.border = thin_border
+                    if idx % 2 == 0:
+                        cell.fill = absent_fill
+                row += 1
+
+    if not day_absent_data:
+        ws2.cell(row=5, column=1, value="所选日期范围内无签到任务").border = thin_border
+
+    col_widths_2 = [14, 6, 12, 14, 8, 24]
+    for col, w in enumerate(col_widths_2, 1):
+        ws2.column_dimensions[get_column_letter(col)].width = w
+
+    # ── 流式响应 ──
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    filename = f"{session_name}_签到记录_{date_label}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
 
 
 @router.get("/sessions/active", response_model=ActiveSessionResponse)

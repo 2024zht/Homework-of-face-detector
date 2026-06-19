@@ -135,16 +135,38 @@ async def check_in(req: CheckInRequest, db: AsyncSession = Depends(get_db)):
             raise HTTPException(status_code=400, detail="QR code expired or invalid")
         if qr.type != "checkin":
             raise HTTPException(status_code=400, detail="This QR code is for check-out, not check-in")
-        # Also verify an active session exists and time is valid (QR flow)
-        _matched_session = await _get_any_valid_session(db)
-        if not _matched_session:
-            stmt = select(CheckInSession).where(CheckInSession.status == "active")
+        # 如果提供了 session_id，使用指定任务
+        if req.session_id:
+            stmt = (select(CheckInSession).where(
+                CheckInSession.id == req.session_id, CheckInSession.status == "active")
+                    .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
             result = await db.execute(stmt)
-            if result.scalar_one_or_none():
-                raise HTTPException(status_code=400, detail="不在签到时间段内")
-            raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
-        location, distance = await _verify_location(req.latitude, req.longitude, qr.location_id, db, req.source)
-        location_name = await reverse_geocode(req.latitude, req.longitude)
+            _matched_session = result.scalar_one_or_none()
+            if not _matched_session:
+                raise HTTPException(status_code=400, detail="该签到任务已结束或不存在")
+            if not is_session_time_valid(_matched_session):
+                raise HTTPException(status_code=400, detail="不在该任务的签到时间段内")
+            location = _matched_session.location
+            if location is None:
+                raise HTTPException(status_code=400, detail="签到任务地点不存在")
+            if req.latitude and req.longitude:
+                within, distance = is_within_range(req.latitude, req.longitude, location.latitude, location.longitude, location.radius_meters, req.source)
+                if not within:
+                    raise HTTPException(status_code=400, detail=f"Out of range: {distance:.0f}m from {location.name}")
+            else:
+                distance = 0
+            location_name = await reverse_geocode(req.latitude, req.longitude) if req.latitude else location.name
+        else:
+            # Also verify an active session exists and time is valid (QR flow)
+            _matched_session = await _get_any_valid_session(db)
+            if not _matched_session:
+                stmt = select(CheckInSession).where(CheckInSession.status == "active")
+                result = await db.execute(stmt)
+                if result.scalar_one_or_none():
+                    raise HTTPException(status_code=400, detail="不在签到时间段内")
+                raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
+            location, distance = await _verify_location(req.latitude, req.longitude, qr.location_id, db, req.source)
+            location_name = await reverse_geocode(req.latitude, req.longitude)
         await mark_qr_used(db, req.token)
 
     # 3. Identify user — name-verified face recognition (priority order)
@@ -381,6 +403,7 @@ async def batch_checkin_video(
     token: str = Form(...),
     latitude: Optional[float] = Form(None),
     longitude: Optional[float] = Form(None),
+    session_id: Optional[int] = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -394,21 +417,34 @@ async def batch_checkin_video(
     if qr.type != "checkin":
         raise HTTPException(status_code=400, detail="This QR is for check-out, not check-in")
 
-    # 1.5 Require active session with valid time window
-    _matched_session = await _get_any_valid_session(db)
-    if not _matched_session:
-        stmt = select(CheckInSession).where(CheckInSession.status == "active")
+    # 1.5 如果提供了 session_id，使用指定任务；否则使用任一活跃任务
+    _matched_session = None
+    if session_id is not None:
+        stmt = (select(CheckInSession).where(
+            CheckInSession.id == session_id, CheckInSession.status == "active")
+                .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
         result = await db.execute(stmt)
-        if result.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="不在签到时间段内")
-        raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
+        _matched_session = result.scalar_one_or_none()
+        if not _matched_session:
+            raise HTTPException(status_code=400, detail="该签到任务已结束或不存在")
+        if not is_session_time_valid(_matched_session):
+            raise HTTPException(status_code=400, detail="不在该任务的签到时间段内")
+    else:
+        _matched_session = await _get_any_valid_session(db)
+        if not _matched_session:
+            stmt = select(CheckInSession).where(CheckInSession.status == "active")
+            result = await db.execute(stmt)
+            if result.scalar_one_or_none():
+                raise HTTPException(status_code=400, detail="不在签到时间段内")
+            raise HTTPException(status_code=400, detail="暂无签到任务，请等待教师发布签到")
 
-    # 2. Verify location
+    # 2. Verify location（若提供了 session_id，使用任务的 location）
+    loc_id_for_check = _matched_session.location_id if session_id is not None else qr.location_id
     if latitude and longitude:
-        location, _ = await _verify_location(latitude, longitude, qr.location_id, db)
+        location, _ = await _verify_location(latitude, longitude, loc_id_for_check, db)
         location_name = await reverse_geocode(latitude, longitude)
     else:
-        stmt = select(Location).where(Location.id == qr.location_id)
+        stmt = select(Location).where(Location.id == loc_id_for_check)
         result = await db.execute(stmt)
         location = result.scalar_one_or_none()
         location_name = location.name if location else None
@@ -426,8 +462,16 @@ async def batch_checkin_video(
     )
     user_result = await db.execute(user_stmt)
     all_users = user_result.fetchall()
-    user_map = {row[0]: row[1] for row in all_users}  # id -> name
-    candidates = [(row[0], row[2]) for row in all_users]  # row[2] = face_embedding bytes
+
+    # 如果指定了任务且有目标用户列表，仅保留目标用户用于人脸匹配
+    if session_id is not None and _matched_session and _matched_session.target_user_ids:
+        target_set = set(int(x.strip()) for x in _matched_session.target_user_ids.split(",") if x.strip())
+        filtered = [row for row in all_users if row[0] in target_set]
+    else:
+        filtered = all_users
+
+    user_map = {row[0]: row[1] for row in filtered}  # id -> name
+    candidates = [(row[0], row[2]) for row in filtered]  # row[2] = face_embedding bytes
 
     if not candidates:
         os.unlink(video_path)
@@ -441,7 +485,7 @@ async def batch_checkin_video(
             process_video,
             video_path=video_path,
             user_embeddings=candidates,
-            location_id=qr.location_id,
+            location_id=loc_id_for_check,
             lat=latitude,
             lng=longitude,
             location_name=location_name,
@@ -477,7 +521,7 @@ async def batch_checkin_video(
         # Record check-in
         checkin = CheckIn(
             user_id=uid,
-            location_id=qr.location_id,
+            location_id=loc_id_for_check,
             lat=latitude,
             lng=longitude,
             location_name=location_name,

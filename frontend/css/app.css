@@ -237,6 +237,32 @@ tr:hover td { background: var(--surface-hover); }
 .flex { display: flex; } .flex-col { flex-direction: column; }
 .hidden { display: none !important; }
 
+/* ── Session detail modal ─────────────────────────── */
+.session-detail-grid {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.session-detail-row {
+  display: flex; gap: 12px; padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.session-detail-label {
+  font-size: 0.82rem; font-weight: 600; color: var(--ink-muted);
+  min-width: 80px; flex-shrink: 0;
+}
+.session-detail-value {
+  font-size: 0.9rem; color: var(--ink);
+}
+
+/* ── Warning button ───────────────────────────────── */
+.btn-warning {
+  background: var(--warning-bg); color: var(--warning);
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 24px; border-radius: var(--radius-sm); border: none;
+  font-size: 0.95rem; font-weight: 600; cursor: pointer;
+  transition: all 0.15s ease; text-decoration: none;
+}
+.btn-warning:hover { background: var(--warning); color: #fff; }
+
 /* ── Mobile ───────────────────────────────────────── */
 @media (max-width: 480px) {
   .container { padding: 16px 12px; }

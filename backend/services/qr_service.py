@@ -15,6 +15,7 @@ async def generate_qr_session(
     location_id: int,
     generated_by: int,
     base_url: str = "",
+    session_id: Optional[int] = None,
 ) -> Tuple[QRSession, str]:
     """
     Create a new QR session and return the session + QR image path.
@@ -33,6 +34,8 @@ async def generate_qr_session(
 
     # Build URL that the QR code points to
     url = f"{base_url}/checkin.html?token={token}&type={qr_type}&location_id={location_id}"
+    if session_id is not None:
+        url += f"&session_id={session_id}"
 
     # Generate QR image
     img = qrcode.make(url)

@@ -2,10 +2,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from dataclasses import dataclass
 
 from database import get_db
-from models import QRSession, Location
+from models import QRSession, Location, CheckInSession
 from schemas import QRGenerateRequest, QRValidateResponse
 from services.qr_service import generate_qr_session, validate_qr_token
 from utils.security import decode_access_token
@@ -34,8 +35,24 @@ async def generate_qr(
     db: AsyncSession = Depends(get_db),
     _admin=Depends(get_current_admin),
 ):
+    # 如果提供了 session_id，查找任务并获取其 location_id
+    location_id = req.location_id
+    session_id = req.session_id
+
+    if session_id is not None:
+        sess_stmt = (select(CheckInSession).where(CheckInSession.id == session_id)
+                     .options(selectinload(CheckInSession.location)))
+        sess_result = await db.execute(sess_stmt)
+        qr_session = sess_result.scalar_one_or_none()
+        if qr_session is None:
+            raise HTTPException(status_code=404, detail="签到任务不存在")
+        if qr_session.status != "active":
+            raise HTTPException(status_code=400, detail="该签到任务已结束")
+        # 使用任务的 location_id（若未冲突）
+        location_id = qr_session.location_id
+
     # Validate location exists
-    loc_stmt = select(Location).where(Location.id == req.location_id, Location.is_active == True)
+    loc_stmt = select(Location).where(Location.id == location_id, Location.is_active == True)
     loc_result = await db.execute(loc_stmt)
     location = loc_result.scalar_one_or_none()
     if location is None:
@@ -48,16 +65,21 @@ async def generate_qr(
     session, filename = await generate_qr_session(
         db=db,
         qr_type=req.type,
-        location_id=req.location_id,
+        location_id=location_id,
         generated_by=int(_admin["sub"]),
         base_url=base_url,
+        session_id=session_id,
     )
+
+    checkin_url = f"{base_url}/checkin.html?token={session.token}&type={session.type}&location_id={location_id}"
+    if session_id is not None:
+        checkin_url += f"&session_id={session_id}"
 
     return {
         "token": session.token,
         "type": session.type,
         "qr_url": f"{base_url}/static/qrcodes/{filename}",
-        "checkin_url": f"{base_url}/checkin.html?token={session.token}&type={session.type}&location_id={req.location_id}",
+        "checkin_url": checkin_url,
         "expires_at": session.expires_at.isoformat(),
     }
 

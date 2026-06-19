@@ -98,6 +98,7 @@ class CheckStatusResponse(BaseModel):
 class QRGenerateRequest(BaseModel):
     type: str = "checkin"  # checkin / checkout
     location_id: int
+    session_id: Optional[int] = None
 
 
 class QRValidateResponse(BaseModel):
@@ -213,3 +214,14 @@ class AdminResetPasswordRequest(BaseModel):
 class CorrectionRequest(BaseModel):
     """Admin reassigns a checkin record to the correct user"""
     correct_user_id: int
+
+
+# ── Session Update ─────────────────────────────────────────
+class SessionUpdate(BaseModel):
+    name: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    checkin_start_time: Optional[str] = None
+    checkin_end_time: Optional[str] = None
+    recurring_days: Optional[str] = None
+    target_user_ids: Optional[str] = None

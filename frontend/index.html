@@ -37,6 +37,7 @@
   </div>
 
   <div class="card" id="mainCard">
+    <div id="sessionInfoBanner" class="hidden" style="background:var(--brand-subtle);padding:8px 14px;border-radius:8px;margin-bottom:14px;font-size:0.9rem;font-weight:650;color:var(--brand)"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <h3 id="stepTitle">第1步：验证位置</h3>
       <span class="badge badge-warning hidden" id="locationBadge">定位中...</span>
@@ -63,12 +64,13 @@
 
 <script>
 var API = window.location.origin;
-var token = null, qrType = null, locationId = null;
+var token = null, qrType = null, locationId = null, sessionId = null, sessionName = null;
 var userLat = null, userLng = null, locationVerified = false, coordSource = null;
 
 (function() {
   var p = new URLSearchParams(window.location.search);
   token = p.get('token'); qrType = p.get('type') || 'checkin'; locationId = p.get('location_id');
+  sessionId = p.get('session_id');
   if (token) {
     document.getElementById('tokenInfo').textContent = 'Session: ' + token.slice(0,8) + '... | ' + qrType;
     // Update UI text for checkout vs checkin
@@ -79,6 +81,18 @@ var userLat = null, userLng = null, locationVerified = false, coordSource = null
     fetch(API + '/api/qr/validate/' + token).then(function(r){return r.json()}).then(function(d){
       if (!d.valid) showToast('二维码已过期', 'error');
       else document.getElementById('stepTitle').textContent = (d.location_name || '签到点') + ' - ' + (qrType === 'checkin' ? '签到' : '签退');
+    });
+  }
+  if (sessionId) {
+    fetch(API + '/api/admin/sessions/' + sessionId).then(function(r){return r.json()}).then(function(d){
+      if (d && d.name) {
+        sessionName = d.name;
+        var banner = document.getElementById('sessionInfoBanner');
+        if (banner) {
+          banner.innerHTML = '&#x1f4cb; ' + d.name;
+          banner.classList.remove('hidden');
+        }
+      }
     });
   }
 })();
@@ -222,10 +236,12 @@ function submitByName() {
   result.innerHTML = '<div class="spinner" style="margin:0 auto"></div><p class="mt-1">处理中...</p>';
 
   var endpoint = qrType === 'checkout' ? '/api/check/out' : '/api/check/in';
+  var body = {token: token, face_image_base64: '', latitude: userLat, longitude: userLng, user_name: name, source: coordSource};
+  if (sessionId) body.session_id = parseInt(sessionId);
   fetch(API + endpoint, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({token: token, face_image_base64: '', latitude: userLat, longitude: userLng, user_name: name, source: coordSource}),
+    body: JSON.stringify(body),
   })
   .then(function(resp) { return resp.json().then(function(data) { return {ok: resp.ok, data: data}; }); })
   .then(function(r) {
