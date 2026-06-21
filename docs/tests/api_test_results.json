@@ -1,0 +1,184 @@
+{
+  "test_time": "2026-06-20T15:21:45.644429",
+  "base_url": "http://120.27.120.99:8080",
+  "total": 29,
+  "passed": 29,
+  "failed": 0,
+  "pass_rate": "100.0%",
+  "results": [
+    {
+      "name": "Health endpoint",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Admin login (valid)",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Admin login (wrong password)",
+      "status": "PASS",
+      "code": 401,
+      "detail": ""
+    },
+    {
+      "name": "Admin login (missing fields)",
+      "status": "PASS",
+      "code": 422,
+      "detail": ""
+    },
+    {
+      "name": "Student login (valid)",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "List all users",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "List students only",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "List locations",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Get today statistics",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Generate checkin QR",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Validate QR token",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Generate checkout QR",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "List active sessions",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Create checkin session",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Create session (duplicate name)",
+      "status": "PASS",
+      "code": 400,
+      "detail": ""
+    },
+    {
+      "name": "Get session detail",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Update session",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Generate QR with session",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Export session Excel",
+      "status": "PASS",
+      "code": 200,
+      "detail": "Binary: 8223 bytes, content-type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    },
+    {
+      "name": "End session",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Check status",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Student active sessions",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "List checkins (admin)",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "List checkins (student own)",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Export Excel (date)",
+      "status": "PASS",
+      "code": 200,
+      "detail": "Binary: 6524 bytes, content-type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    },
+    {
+      "name": "Export Excel (date range)",
+      "status": "PASS",
+      "code": 200,
+      "detail": "Binary: 8283 bytes, content-type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    },
+    {
+      "name": "Validate location",
+      "status": "PASS",
+      "code": 200,
+      "detail": ""
+    },
+    {
+      "name": "Access admin API without token",
+      "status": "PASS",
+      "code": 401,
+      "detail": ""
+    },
+    {
+      "name": "Access admin API with student token",
+      "status": "PASS",
+      "code": 403,
+      "detail": ""
+    }
+  ]
+}
