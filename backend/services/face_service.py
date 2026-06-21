@@ -4,13 +4,14 @@ from typing import Optional, Tuple, List
 import numpy as np
 from PIL import Image
 
-# ── DLL setup for GPU ────────────────────────────────────
-_site = os.path.join(os.path.dirname(sys.executable), "lib", "site-packages")
-for _pkg in ["nvidia\\cudnn\\bin", "nvidia\\cublas\\bin", "nvidia\\cuda_nvrtc\\bin"]:
-    _d = os.path.join(_site, _pkg)
-    if os.path.isdir(_d) and hasattr(os, "add_dll_directory"):
-        os.add_dll_directory(_d)
-    os.environ["PATH"] = _d + ";" + os.environ.get("PATH", "")
+# ── DLL setup for GPU (Windows only) ────────────────────
+if sys.platform == "win32":
+    _site = os.path.join(os.path.dirname(sys.executable), "lib", "site-packages")
+    for _pkg in ["nvidia\\cudnn\\bin", "nvidia\\cublas\\bin", "nvidia\\cuda_nvrtc\\bin"]:
+        _d = os.path.join(_site, _pkg)
+        if os.path.isdir(_d) and hasattr(os, "add_dll_directory"):
+            os.add_dll_directory(_d)
+        os.environ["PATH"] = _d + ";" + os.environ.get("PATH", "")
 
 import cv2
 from insightface.app import FaceAnalysis

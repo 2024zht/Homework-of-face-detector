@@ -1,4 +1,5 @@
 """QR code routes"""
+import urllib.parse
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -74,6 +75,8 @@ async def generate_qr(
     checkin_url = f"{base_url}/checkin.html?token={session.token}&type={session.type}&location_id={location_id}"
     if session_id is not None:
         checkin_url += f"&session_id={session_id}"
+        if qr_session.name:
+            checkin_url += f"&session_name={urllib.parse.quote(qr_session.name)}"
 
     return {
         "token": session.token,

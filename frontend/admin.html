@@ -458,8 +458,6 @@ async function generateQR() {
   document.getElementById('qrResult').innerHTML = `
     <div class="qr-display">
       <img src="${d.qr_url}" alt="QR Code">
-      <p class="qr-url mt-1">扫码URL: ${d.checkin_url}</p>
-      <p style="font-size:0.78rem;color:var(--ink-muted)">有效期至: ${new Date(d.expires_at).toLocaleString()} | 令牌: ${d.token.slice(0,8)}...</p>
       <button class="btn btn-secondary mt-2" onclick="window.open('${d.checkin_url}','_blank')">在浏览器中打开测试</button>
     </div>
   `;
@@ -801,9 +799,11 @@ async function loadSessionStatus() {
         meta += ' <span class="sep"></span> ' + (s.location_name || '-');
         if (s.checkin_start_time) meta += ' <span class="sep"></span> ' + s.checkin_start_time + '–' + s.checkin_end_time;
         if (s.start_date) meta += ' <span class="sep"></span> ' + (s.start_date||'') + (s.end_date ? ' → ' + s.end_date : '');
-        if (s.recurring_days) {
+        if (s.recurring_days && s.recurring_days !== '') {
           var days = s.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join('·');
           meta += ' <span class="sep"></span> ' + days;
+        } else {
+          meta += ' <span class="sep"></span> 每天';
         }
         var count = s.target_user_ids ? s.target_user_ids.split(',').length + '人' : '所有人';
         meta += ' <span class="sep"></span> ' + count;
@@ -912,31 +912,38 @@ async function endSession(sessionId) {
 var _currentSessionId = null;
 var _currentEditSession = null;
 
-function openSessionDetail(sessionId) {
-  // Find session in _activeSessions
-  var session = null;
-  for (var i = 0; i < _activeSessions.length; i++) {
-    if (_activeSessions[i].id === sessionId) { session = _activeSessions[i]; break; }
-  }
-  if (!session) return;
+async function openSessionDetail(sessionId) {
+  // Fetch full session detail from API (with resolved user names)
   _currentSessionId = sessionId;
-  _currentEditSession = session;
+  document.getElementById('sessionDetailModal').classList.remove('hidden');
+  document.getElementById('sessionDetailView').classList.remove('hidden');
+  document.getElementById('sessionDetailEdit').classList.add('hidden');
+  document.getElementById('sessionDetailGrid').innerHTML = '<div class="spinner" style="margin:20px auto"></div><p style="text-align:center">加载中...</p>';
+  var detailName = document.getElementById('sessionDetailName');
+  detailName.textContent = '任务#' + sessionId;
+  document.getElementById('sessionDetailBadge').innerHTML = '';
 
-  // Populate view mode
-  document.getElementById('sessionDetailName').textContent = session.name || '任务#' + session.id;
-  var cls = session.time_valid ? 'badge-success' : 'badge-warning';
-  var txt = session.time_valid ? '进行中' : '非签到时间';
-  document.getElementById('sessionDetailBadge').innerHTML = '<span class="badge ' + cls + '">' + txt + '</span>';
+  try {
+    var r = await api('/api/admin/sessions/' + sessionId);
+    var session = await r.json();
+    if (!r.ok) { alert(session.detail || '加载失败'); closeSessionDetail(); return; }
+    _currentEditSession = session;
 
-  var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
-  var recurringDisplay = '—';
-  if (session.recurring_days) {
-    recurringDisplay = session.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join('·');
-  } else if (session.recurring_days === '') {
-    recurringDisplay = '每天';
-  }
-  var targetDisplay = session.target_user_ids ? session.target_user_ids.split(',').length + '人' : '所有人';
-  var creatorDisplay = session.creator_name || '—';
+    // Populate view mode
+    detailName.textContent = session.name || '任务#' + session.id;
+    var cls = session.time_valid ? 'badge-success' : 'badge-warning';
+    var txt = session.time_valid ? '进行中' : '非签到时间';
+    document.getElementById('sessionDetailBadge').innerHTML = '<span class="badge ' + cls + '">' + txt + '</span>';
+
+    var dayLabels = {'0':'一','1':'二','2':'三','3':'四','4':'五','5':'六','6':'日'};
+    var recurringDisplay;
+    if (session.recurring_days && session.recurring_days !== '') {
+      recurringDisplay = session.recurring_days.split(',').map(function(d){return '周'+dayLabels[d];}).join('·');
+    } else {
+      recurringDisplay = '每天';
+    }
+    var targetDisplay = session.target_user_names || (session.target_user_ids ? session.target_user_ids.split(',').length + '人' : '所有人');
+    var creatorDisplay = session.creator_name || '—';
 
   var gridHtml = '';
   gridHtml += '<div class="session-detail-row"><span class="session-detail-label">签到点</span><span class="session-detail-value">' + (session.location_name || '—') + '</span></div>';
@@ -952,6 +959,10 @@ function openSessionDetail(sessionId) {
   document.getElementById('sessionDetailView').classList.remove('hidden');
   document.getElementById('sessionDetailEdit').classList.add('hidden');
   document.getElementById('sessionDetailModal').classList.remove('hidden');
+  } catch(e) {
+    alert('加载任务详情失败: ' + e.message);
+    closeSessionDetail();
+  }
 }
 
 function toggleSessionEdit() {
@@ -1035,9 +1046,9 @@ async function saveSessionEdit(sessionId) {
   }
 }
 
-async function exportSessionExcel(sessionId, type) {
+async function exportSessionExcel(sessionId) {
   try {
-    var res = await api('/api/admin/sessions/' + sessionId + '/export?type=' + type);
+    var res = await api('/api/admin/sessions/' + sessionId + '/export');
     if (!res.ok) {
       var err = await res.json();
       alert(err.detail || '导出失败');
@@ -1048,7 +1059,7 @@ async function exportSessionExcel(sessionId, type) {
     var a = document.createElement('a');
     a.href = url;
     var disposition = res.headers.get('Content-Disposition');
-    var downloadName = type === 'checked_in' ? '已签到记录.xlsx' : '未签到记录.xlsx';
+    var downloadName = '签到记录.xlsx';
     if (disposition) {
       var starMatch = disposition.match(/filename\*=UTF-8''([^;]+)/);
       if (starMatch && starMatch[1]) {
@@ -1145,10 +1156,9 @@ loadDashboard();
       <h3 id="sessionDetailName"></h3>
       <div class="mt-1" id="sessionDetailBadge"></div>
       <div class="session-detail-grid mt-2" id="sessionDetailGrid"></div>
-      <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;margin-top:20px">
         <button class="btn btn-secondary" onclick="toggleSessionEdit()">&#x270f; 编辑任务</button>
-        <button class="btn btn-primary" id="sessionExportCheckedBtn" onclick="exportSessionExcel(_currentSessionId, 'checked_in')">&#x1f4e5; 导出已签到</button>
-        <button class="btn btn-warning" id="sessionExportAbsentBtn" onclick="exportSessionExcel(_currentSessionId, 'absent')">&#x1f4e5; 导出未签到</button>
+        <button class="btn btn-primary" onclick="exportSessionExcel(_currentSessionId)">&#x1f4e5; 导出签到数据</button>
         <button class="btn btn-secondary" onclick="closeSessionDetail()">关闭</button>
       </div>
     </div>

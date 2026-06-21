@@ -174,6 +174,7 @@ class SessionResponse(BaseModel):
     checkin_end_time: Optional[str] = None
     recurring_days: Optional[str] = None
     target_user_ids: Optional[str] = None
+    target_user_names: Optional[str] = None
     time_valid: bool = True  # whether current time falls within session window
 
     class Config:

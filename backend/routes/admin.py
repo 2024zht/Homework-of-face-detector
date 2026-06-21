@@ -790,7 +790,7 @@ def is_session_time_valid(session: CheckInSession) -> bool:
     return True
 
 
-def _session_to_response(session: CheckInSession) -> dict:
+def _session_to_response(session: CheckInSession, target_user_names: Optional[str] = None) -> dict:
     return {
         "id": session.id,
         "location_id": session.location_id,
@@ -807,8 +807,22 @@ def _session_to_response(session: CheckInSession) -> dict:
         "checkin_end_time": session.checkin_end_time.strftime("%H:%M") if session.checkin_end_time else None,
         "recurring_days": session.recurring_days,
         "target_user_ids": session.target_user_ids,
+        "target_user_names": target_user_names,
         "time_valid": is_session_time_valid(session),
     }
+
+
+async def _resolve_target_names(db: AsyncSession, target_user_ids: Optional[str]) -> Optional[str]:
+    """Resolve comma-separated user IDs to comma-separated user names."""
+    if not target_user_ids:
+        return None
+    ids = [int(x.strip()) for x in target_user_ids.split(",") if x.strip().isdigit()]
+    if not ids:
+        return None
+    stmt = select(User.name).where(User.id.in_(ids))
+    result = await db.execute(stmt)
+    names = [row[0] for row in result.fetchall()]
+    return ", ".join(names)
 
 
 @router.post("/sessions", response_model=SessionResponse)
@@ -823,6 +837,16 @@ async def create_session(
     location = loc_result.scalar_one_or_none()
     if not location:
         raise HTTPException(status_code=404, detail="签到点不存在或已停用")
+
+    # Check for duplicate name among active sessions
+    if req.name and req.name.strip():
+        dup_stmt = select(CheckInSession).where(
+            CheckInSession.name == req.name.strip(),
+            CheckInSession.status == "active",
+        )
+        dup_result = await db.execute(dup_stmt)
+        if dup_result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="签到任务名称已存在，请使用不同的名称")
 
     session = CheckInSession(
         location_id=req.location_id,
@@ -842,7 +866,8 @@ async def create_session(
             .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
     result = await db.execute(stmt)
     session = result.scalar_one()
-    return _session_to_response(session)
+    names = await _resolve_target_names(db, session.target_user_ids)
+    return _session_to_response(session, target_user_names=names)
 
 
 @router.post("/sessions/{session_id}/end", response_model=SessionResponse)
@@ -882,6 +907,17 @@ async def update_session(
     if not session:
         raise HTTPException(status_code=404, detail="签到任务不存在")
 
+    # Check for duplicate name (exclude self)
+    if req.name is not None and req.name.strip():
+        dup_stmt = select(CheckInSession).where(
+            CheckInSession.name == req.name.strip(),
+            CheckInSession.status == "active",
+            CheckInSession.id != session_id,
+        )
+        dup_result = await db.execute(dup_stmt)
+        if dup_result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="签到任务名称已存在，请使用不同的名称")
+
     # 只更新提供的字段，不修改 location_id
     if req.name is not None:
         session.name = req.name.strip() if req.name else None
@@ -920,14 +956,15 @@ async def export_session_checkins(
     session_name = session.name or f"Session#{session_id}"
 
     # ── 确定日期范围 ──
+    today = beijing_now_naive().date()
     if session.start_date:
         d_from = session.start_date
     else:
-        d_from = beijing_now_naive().date()
+        d_from = today
     if session.end_date:
-        d_to = session.end_date
+        d_to = min(session.end_date, today)
     else:
-        d_to = beijing_now_naive().date()
+        d_to = today
 
     date_label = f"{d_from.isoformat()} 至 {d_to.isoformat()}"
     day_start = datetime(d_from.year, d_from.month, d_from.day)
@@ -1193,3 +1230,20 @@ async def get_active_session(
         "has_active_session": len(sessions) > 0,
         "sessions": [_session_to_response(s) for s in sessions],
     }
+
+
+@router.get("/sessions/{session_id}")
+async def get_session(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+    _admin=Depends(get_current_admin),
+):
+    """Get a single check-in session with details."""
+    stmt = (select(CheckInSession).where(CheckInSession.id == session_id)
+            .options(selectinload(CheckInSession.location), selectinload(CheckInSession.creator)))
+    result = await db.execute(stmt)
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="签到任务不存在")
+    names = await _resolve_target_names(db, session.target_user_ids)
+    return _session_to_response(session, target_user_names=names)

@@ -83,17 +83,15 @@ var userLat = null, userLng = null, locationVerified = false, coordSource = null
       else document.getElementById('stepTitle').textContent = (d.location_name || '签到点') + ' - ' + (qrType === 'checkin' ? '签到' : '签退');
     });
   }
-  if (sessionId) {
-    fetch(API + '/api/admin/sessions/' + sessionId).then(function(r){return r.json()}).then(function(d){
-      if (d && d.name) {
-        sessionName = d.name;
-        var banner = document.getElementById('sessionInfoBanner');
-        if (banner) {
-          banner.innerHTML = '&#x1f4cb; ' + d.name;
-          banner.classList.remove('hidden');
-        }
-      }
-    });
+  // Session banner: read session_name from URL param if present
+  var urlSessionName = p.get('session_name');
+  if (urlSessionName) {
+    sessionName = decodeURIComponent(urlSessionName);
+    var banner = document.getElementById('sessionInfoBanner');
+    if (banner) {
+      banner.innerHTML = '&#x1f4cb; ' + sessionName;
+      banner.classList.remove('hidden');
+    }
   }
 })();
 
@@ -246,18 +244,22 @@ function submitByName() {
   .then(function(resp) { return resp.json().then(function(data) { return {ok: resp.ok, data: data}; }); })
   .then(function(r) {
     if (r.ok) {
-      result.innerHTML = '<div class="badge badge-success" style="font-size:1.2rem">&#x2705; 签到成功!</div><p class="mt-1" style="font-size:1.1rem;font-weight:700">' + r.data.user_name + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">时间: ' + new Date(r.data.check_in_time).toLocaleString() + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">距离: ' + (r.data.distance_meters || '?') + 'm</p>';
+      var isCheckout = (qrType === 'checkout');
+      var statusText = isCheckout ? '已签退' : '已签到';
+      var actionText = isCheckout ? '签退成功!' : '签到成功!';
+      result.innerHTML = '<div class="badge badge-success" style="font-size:1.2rem">&#x2705; ' + actionText + '</div><p class="mt-1" style="font-size:1.1rem;font-weight:700">' + r.data.user_name + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">时间: ' + new Date(r.data.check_in_time).toLocaleString() + '</p><p style="font-size:0.82rem;color:var(--ink-muted)">距离: ' + (r.data.distance_meters || '?') + 'm</p>';
       document.getElementById('statusCard').classList.remove('hidden');
-      document.getElementById('statusTitle').textContent = '已签到';
+      document.getElementById('statusTitle').textContent = statusText;
       document.getElementById('mainCard').classList.add('hidden');
     } else {
+      var isCheckout2 = (qrType === 'checkout');
       result.innerHTML = '<div class="badge badge-danger">' + (r.data.detail || '失败') + '</div>';
-      btn.disabled = false; btn.textContent = '确认签到';
+      btn.disabled = false; btn.textContent = isCheckout2 ? '确认签退' : '确认签到';
     }
   })
   .catch(function(e) {
     result.innerHTML = '<div class="badge badge-danger">网络错误: ' + e.message + '</div>';
-    btn.disabled = false; btn.textContent = '确认签到';
+    btn.disabled = false; btn.textContent = qrType === 'checkout' ? '确认签退' : '确认签到';
   });
 }
 
